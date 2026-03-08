@@ -155,7 +155,10 @@ local phonics_ordered = {
     {"Atal'Voh", "A'tall'Voh"},
     {"Atal'Kaldan", "A'tall'Kaldan"},
     {"Atal'Zul", "A'tall'Zul"},
-    
+
+    {"Mechagon", "Mechah|g%hon"},
+
+
 
 
 }
@@ -227,21 +230,21 @@ end
 
 local function GetGossipBodyText()
     if C_GossipInfo and C_GossipInfo.GetText then
-        local t = CleanText(C_GossipInfo.GetText())
+        local t = CleanText(C_GossipInfo.GetText() .. "\n")
         if t and #t > 0 then
             RuneReaderVoice:Dbg("Gossip text from C_GossipInfo.GetText: " .. #t .. " chars")
             return t
         end
     end
     if GetGossipText then
-        local t = CleanText(GetGossipText())
+        local t = CleanText(GetGossipText() .. "\n")
         if t and #t > 0 then
             RuneReaderVoice:Dbg("Gossip text from GetGossipText: " .. #t .. " chars")
             return t
         end
     end
     if GossipGreetingText then
-        local t = CleanText(GossipGreetingText:GetText())
+        local t = CleanText(GossipGreetingText:GetText() .. "\n")
         if t and #t > 0 then
             RuneReaderVoice:Dbg("Gossip text from GossipGreetingText FontString: " .. #t .. " chars")
             return t
@@ -290,7 +293,7 @@ end
 handlers.QUEST_GREETING = function()
     local db = RuneReaderVoiceDB
     if not db or not db.EnableQuestGreeting then return end
-    local text = CleanText(GetGreetingText())
+    local text = CleanText(GetGreetingText() .. "\n")
     if not text or #text == 0 then return end
     RuneReaderVoice:Dbg("QUEST_GREETING: " .. #text .. " chars")
     DispatchDialog(text)
@@ -301,9 +304,9 @@ handlers.QUEST_DETAIL = function()
     local db = RuneReaderVoiceDB
     if not db or not db.EnableQuestDetail then return end
 
-    local title     = CleanText(GetTitleText())
-    local questText = CleanText(GetQuestText())
-    local objective = CleanText(GetObjectiveText())
+    local title     = CleanText(GetTitleText() .. "\n")
+    local questText = CleanText(GetQuestText() .. "\n")
+    local objective = CleanText(GetObjectiveText() .. "\n")
 
     local parts = {}
     if title     and #title     > 0 then table.insert(parts, title) end
@@ -325,7 +328,7 @@ end
 handlers.QUEST_PROGRESS = function()
     local db = RuneReaderVoiceDB
     if not db or not db.EnableQuestProgress then return end
-    local text = CleanText(GetProgressText())
+    local text = CleanText(GetProgressText() .. "/n")
     if not text or #text == 0 then return end
     RuneReaderVoice:Dbg("QUEST_PROGRESS: " .. #text .. " chars")
     DispatchDialog(text)
@@ -335,7 +338,7 @@ end
 handlers.QUEST_COMPLETE = function()
     local db = RuneReaderVoiceDB
     if not db or not db.EnableQuestReward then return end
-    local text = CleanText(GetRewardText())
+    local text = CleanText(GetRewardText() .. "/n")
     if not text or #text == 0 then return end
     RuneReaderVoice:Dbg("QUEST_COMPLETE: " .. #text .. " chars")
     DispatchDialog(text)
