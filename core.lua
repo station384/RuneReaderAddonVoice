@@ -97,26 +97,82 @@ local _bookActive           = false
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
+-- Symbol	Description
+-- '	primary stress
+-- ,	secondary stress
+-- %	unstressed syllable
+-- =	put the primary stress on the preceding syllable
+-- _:	short pause
+-- _	a shorter pause
+-- |	use to separate two adjacent characters, to prevent them from being considered as a single multi-character phoneme
+-- ||	indicates a word boundary within a phonetic string
+
+local phonics_ordered = {
+    {"Blackwood Lake", "Black-wood Lake"},
+    {"Stranglethorn", "Strangle-thorn"},
+    {"Scholomance", "Scholo-mance"},
+    {"Eversong", "Ever-song"},
+    {"Duskwood", "Dusk-wood"},
+    {"Alterac", "Alter-ack"},
+    {"Arathi", "Arath-ee"},
+    {"Dunmorogh", "Dun-mor-ogh"},
+    {"Tirisfal", "Tiris-fall"},
+    {"Silverpine", "Silver-pine"},
+    {"Westfall", "West-fall"},
+    {"Redridge", "Red-ridge"},
+    {"Stormwind", "Storm-wind"},
+    {"Elwynn", "El-win"},
+    {"Stratholme", "Strath-olme"},
+    {"recuperate", "recooperate"},
+    {"destroy", "de-stroy"},
+    {"immanent", "emm'a'nent"},
+    {"supplies", "supplize"},
+    {"Darnassus", "Dar-nassus"},
+    {"Durotar", "Du-ro-tar"},
+    {"Dustwallow", "Dust-wallow"},
+    {"Feralas", "Fer-allas"},
+    {"Maraudon", "Mar-row-don"},
+    {"Tanaris", "Tan-ar-is"},
+    {"Azshara", "Az-shar-ah"},
+
+    -- Trolls.... 
+    {"Atal'Aman", "A'tall'Ahhmahnn"},
+    {"Amani", "Amahnee"},
+    {"dese", "Dee's"},
+    {" de ", " d'"},
+
+    {"Zul'Farrak", "Zul-Farrack"},
+    {"Zul'Gurub", "Zul-Gurub"},
+    {"Atal'Gral", "A'tall'Grahl"},
+    {"Atal'Dazar", "A'tall'Dahzar"},
+    {"Atal'Jani", "A'tall'Jahnee"},
+    {"Atal'Kah", "A'tall'Kah"},
+    {"Atal'Ma", "A'tall'Mah"},
+    {"Atal'Qor", "A'tall'Kor"},
+    {"Atal'Raza", "A'tall'Rahzah"},
+    {"Atal'Shanar", "A'tall'Shahnar"},         
+    {"Atal'Thalar", "A'tall'Thahlar"},
+    {"Atal'Voh", "A'tall'Voh"},
+    {"Atal'Kaldan", "A'tall'Kaldan"},
+    {"Atal'Zul", "A'tall'Zul"},
+    
+
+
+}
+
+local function apply_phonics(text)
+    for _, to in ipairs(phonics_ordered) do
+        text = text:gsub(to[1], to[2])
+       -- print (to[1], "->", to[2])
+    end
+    return text
+end
 local function CleanText(text)
     if not text then return nil end
     -- Strip WoW colour codes  |cffRRGGBB ... |r
     text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
     -- Replace common zone names with hyphenated versions to improve TTS chunking.
-    text = text:gsub("Eversong","Ever-song")
-    text = text:gsub("Duskwood","Dusk-wood")
-    text = text:gsub("Stranglethorn","Strangle-thorn")
-    text = text:gsub("Alterac","Alter-ack")
-    text = text:gsub("Arathi","Arath-ee")
-    text = text:gsub("Dunmorogh","Dun-mor-ogh")
-    text = text:gsub("Tirisfal","Tiris-fall") 
-    text = text:gsub("Silverpine","Silver-pine")
-    text = text:gsub("Westfall","West-fall")
-    text = text:gsub("Redridge","Red-ridge")
-    text = text:gsub("Stormwind","Storm-wind")
-    text = text:gsub("Elwynn","El-win")
-    text = text:gsub("Stratholme","Strath-olme")
-    text = text:gsub("Scholomance","Scholo-mance")
-    text = text:gsub("Blackwood Lake","Black-wood Lake")
+    text = apply_phonics(text)
 
 
     -- Collapse whitespace / newlines
