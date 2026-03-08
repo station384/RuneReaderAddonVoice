@@ -101,10 +101,28 @@ local function CleanText(text)
     if not text then return nil end
     -- Strip WoW colour codes  |cffRRGGBB ... |r
     text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-    text = text:gsub("Eversong","Ever song")
+    -- Replace common zone names with hyphenated versions to improve TTS chunking.
+    text = text:gsub("Eversong","Ever-song")
+    text = text:gsub("Duskwood","Dusk-wood")
+    text = text:gsub("Stranglethorn","Strangle-thorn")
+    text = text:gsub("Alterac","Alter-ack")
+    text = text:gsub("Arathi","Arath-ee")
+    text = text:gsub("Dunmorogh","Dun-mor-ogh")
+    text = text:gsub("Tirisfal","Tiris-fall") 
+    text = text:gsub("Silverpine","Silver-pine")
+    text = text:gsub("Westfall","West-fall")
+    text = text:gsub("Redridge","Red-ridge")
+    text = text:gsub("Stormwind","Storm-wind")
+    text = text:gsub("Elwynn","El-win")
+    text = text:gsub("Stratholme","Strath-olme")
+    text = text:gsub("Scholomance","Scholo-mance")
+    text = text:gsub("Blackwood Lake","Black-wood Lake")
+
+
     -- Collapse whitespace / newlines
     --text = text:gsub("%s+", " ")
-    local m = text:match("^%s*(.-)%s*$") 
+    text = text:gsub("[ \t\f\v]+", " ")
+    local m = text   --text:match("^%s*(.-)%s*$") 
 
     return m
 end
