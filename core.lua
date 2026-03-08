@@ -101,9 +101,12 @@ local function CleanText(text)
     if not text then return nil end
     -- Strip WoW colour codes  |cffRRGGBB ... |r
     text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    text = text:gsub("Eversong","Ever song")
     -- Collapse whitespace / newlines
-    text = text:gsub("%s+", " ")
-    return text:match("^%s*(.-)%s*$")
+    --text = text:gsub("%s+", " ")
+    local m = text:match("^%s*(.-)%s*$") 
+
+    return m
 end
 
 -- DispatchDialog: split text into narrator/NPC segments, build QR sessions,
