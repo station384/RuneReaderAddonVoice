@@ -83,6 +83,9 @@ local EVENTS = {
     "ITEM_TEXT_BEGIN",
     "ITEM_TEXT_READY",
     "ITEM_TEXT_CLOSED",
+    "TAXIMAP_CLOSED",
+    "ADVENTURE_MAP_CLOSE",
+    "MERCHANT_CLOSED",
 }
 
 for _, ev in ipairs(EVENTS) do
@@ -108,6 +111,7 @@ local _bookActive           = false
 -- ||	indicates a word boundary within a phonetic string
 
 local phonics_ordered = {
+    {"talons","tal'ens"},
     {"Blackwood Lake", "Black-wood Lake"},
     {"Stranglethorn", "Strangle-thorn"},
     {"Scholomance", "Scholo-mance"},
@@ -289,6 +293,16 @@ handlers.GOSSIP_CLOSED = function()
     -- No action. Cleanup handled by GossipFrame:OnHide hook.
 end
 
+local function StopOnFrameClose(eventName)
+    RuneReaderVoice:Dbg(eventName .. " -> StopDisplay")
+    RuneReaderVoice:StopDisplay()
+    _activeDialogID = nil
+end
+
+handlers.TAXIMAP_CLOSED        = function() StopOnFrameClose("TAXIMAP_CLOSED") end
+handlers.ADVENTURE_MAP_CLOSE   = function() StopOnFrameClose("ADVENTURE_MAP_CLOSE") end
+handlers.MERCHANT_CLOSED       = function() StopOnFrameClose("MERCHANT_CLOSED") end
+
 -- ── Quest greeting (multi-quest NPC) ─────────────────────────────────────────
 handlers.QUEST_GREETING = function()
     local db = RuneReaderVoiceDB
@@ -328,7 +342,7 @@ end
 handlers.QUEST_PROGRESS = function()
     local db = RuneReaderVoiceDB
     if not db or not db.EnableQuestProgress then return end
-    local text = CleanText(GetProgressText() .. "/n")
+    local text = CleanText(GetProgressText() .. "\n")
     if not text or #text == 0 then return end
     RuneReaderVoice:Dbg("QUEST_PROGRESS: " .. #text .. " chars")
     DispatchDialog(text)
@@ -338,7 +352,7 @@ end
 handlers.QUEST_COMPLETE = function()
     local db = RuneReaderVoiceDB
     if not db or not db.EnableQuestReward then return end
-    local text = CleanText(GetRewardText() .. "/n")
+    local text = CleanText(GetRewardText() .. "\n")
     if not text or #text == 0 then return end
     RuneReaderVoice:Dbg("QUEST_COMPLETE: " .. #text .. " chars")
     DispatchDialog(text)
