@@ -249,6 +249,44 @@ function RuneReaderVoice:SplitSegments(text)
         end
     end
 
+    -- Quest Objective split: the objective text is always appended at the end,
+    -- so it will be in the last segment. core.lua prefixes it with a \1 sentinel
+    -- (ASCII SOH — never appears in WoW dialog text). Find it, split there:
+    --   • everything before  → remains as NPC speech (update last segment, or drop if empty)
+    --   • everything after   → new narrator segment (sentinel byte stripped)
+    -- Handles both "Quest Objective" and "Quest Objectives".
+    if #segments > 0 then
+        local lastSeg = segments[#segments]
+        local questStart = lastSeg.text:find("\1", 1, true)
+        if questStart then
+            -- NPC part: text before the sentinel
+            local npcPart       = lastSeg.text:sub(1, questStart - 1):match("^%s*(.-)%s*$")
+            local afterSentinel = lastSeg.text:sub(questStart)
+
+            -- Narrator part: two options — pick whichever sounds better.
+            --
+            -- Option A (strip sentinel): narrator reads only the objective text.
+            --   e.g. "Collect 5 apples and return to Thrall."
+            local narratorPart = afterSentinel:sub(2):match("^%s*(.-)%s*$")
+            --
+            -- Option B (keep "Quest Objectives" prefix): narrator announces then reads.
+            --   e.g. "Quest Objectives. Collect 5 apples and return to Thrall."
+            -- local narratorPart = ("Quest Objectives. " .. afterSentinel:sub(2)):match("^%s*(.-)%s*$")
+
+            -- Update or remove the last segment
+            if npcPart and #npcPart > 0 then
+                segments[#segments].text = npcPart
+            else
+                table.remove(segments)
+            end
+
+            -- Append the narrator segment for the objective text
+            if narratorPart and #narratorPart > 0 then
+                table.insert(segments, { text = narratorPart, isNarrator = true })
+            end
+        end
+    end
+
     -- Fallback: if nothing parsed (shouldn't happen), return whole text as NPC
     if #segments == 0 then
         table.insert(segments, { text = text, isNarrator = false })

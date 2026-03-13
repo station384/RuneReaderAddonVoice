@@ -336,8 +336,11 @@ handlers.QUEST_DETAIL = function()
 
     local title     = CleanText(GetTitleText() .. "\n")
     local questText = CleanText(GetQuestText() .. "\n")
-    local objective = CleanText(GetObjectiveText() .. "\n")
-
+    local objective = nil
+    if (GetObjectiveText() or "") ~= "" then
+         objective = CleanText("\1" .. GetObjectiveText() .. "\n")
+    end
+    
     local parts = {}
     if title     and #title     > 0 then table.insert(parts, title) end
     if questText and #questText > 0 then table.insert(parts, questText) end
