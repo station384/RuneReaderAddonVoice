@@ -96,6 +96,7 @@ end
 
 local _activeDialogID       = nil   -- dialogID of whatever is currently displayed
 local _questDetailDialogID  = nil   -- dialogID started by the last QUEST_DETAIL
+local _questDetailOpen      = false -- true only while a QUEST_DETAIL dialog is considered open
 local _bookActive           = false
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
@@ -111,58 +112,58 @@ local _bookActive           = false
 -- ||	indicates a word boundary within a phonetic string
 
 local phonics_ordered = {
-    {"talons","tal'ens"},
-    {"Blackwood Lake", "Black-wood Lake"},
-    {"Stranglethorn", "Strangle-thorn"},
-    {"Scholomance", "Scholo-mance"},
-    {"Eversong", "Ever-song"},
-    {"Duskwood", "Dusk-wood"},
-    {"Alterac", "Alter-ack"},
-    {"Arathi", "Arath-ee"},
-    {"Dunmorogh", "Dun-mor-ogh"},
-    {"Tirisfal", "Tiris-fall"},
-    {"Silverpine", "Silver-pine"},
-    {"Westfall", "West-fall"},
-    {"Redridge", "Red-ridge"},
-    {"Stormwind", "Storm-wind"},
-    {"Elwynn", "El-win"},
-    {"Stratholme", "Strath-olme"},
-    {"recuperate", "recooperate"},
-    {"destroy", "de-stroy"},
-    {"immanent", "emm'a'nent"},
-    {"supplies", "supplize"},
-    {"Darnassus", "Dar-nassus"},
-    {"Durotar", "Du-ro-tar"},
-    {"Dustwallow", "Dust-wallow"},
-    {"Feralas", "Fer-allas"},
-    {"Maraudon", "Mar-row-don"},
-    {"Tanaris", "Tan-ar-is"},
-    {"Azshara", "Az-shar-ah"},
+    -- {"talons","tal'ens"},
+    -- {"Blackwood Lake", "Black-wood Lake"},
+    -- {"Stranglethorn", "Strangle-thorn"},
+    -- {"Scholomance", "Scholo-mance"},
+    -- {"Eversong", "Ever-song"},
+    -- {"Duskwood", "Dusk-wood"},
+    -- {"Alterac", "Alter-ack"},
+    -- {"Arathi", "Arath-ee"},
+    -- {"Dunmorogh", "Dun-mor-ogh"},
+    -- {"Tirisfal", "Tiris-fall"},
+    -- {"Silverpine", "Silver-pine"},
+    -- {"Westfall", "West-fall"},
+    -- {"Redridge", "Red-ridge"},
+    -- {"Stormwind", "Storm-wind"},
+    -- {"Elwynn", "El-win"},
+    -- {"Stratholme", "Strath-olme"},
+    -- {"recuperate", "recooperate"},
+    -- {"destroy", "de-stroy"},
+    -- {"immanent", "emm'a'nent"},
+    -- {"supplies", "supplize"},
+    -- {"Darnassus", "Dar-nassus"},
+    -- {"Durotar", "Du-ro-tar"},
+    -- {"Dustwallow", "Dust-wallow"},
+    -- {"Feralas", "Fer-allas"},
+    -- {"Maraudon", "Mar-row-don"},
+    -- {"Tanaris", "Tan-ar-is"},
+    -- {"Azshara", "Az-shar-ah"},
 
-    -- Trolls.... 
-    {"Atal'Aman", "A'tall'Ahhmahnn"},
-    {"Amani", "Amahnee"},
-    {"dese", "Dee's"},
-    {" de ", " d'"},
+    -- -- Trolls.... 
+    -- {"Atal'Aman", "A'tall'Ahhmahnn"},
+    -- {"Amani", "Amahnee"},
+    -- {"dese", "Dee's"},
+    -- {" de ", " d'"},
 
-    {"Zul'Farrak", "Zul-Farrack"},
-    {"Zul'Gurub", "Zul-Gurub"},
-    {"Atal'Gral", "A'tall'Grahl"},
-    {"Atal'Dazar", "A'tall'Dahzar"},
-    {"Atal'Jani", "A'tall'Jahnee"},
-    {"Atal'Kah", "A'tall'Kah"},
-    {"Atal'Ma", "A'tall'Mah"},
-    {"Atal'Qor", "A'tall'Kor"},
-    {"Atal'Raza", "A'tall'Rahzah"},
-    {"Atal'Shanar", "A'tall'Shahnar"},         
-    {"Atal'Thalar", "A'tall'Thahlar"},
-    {"Atal'Voh", "A'tall'Voh"},
-    {"Atal'Kaldan", "A'tall'Kaldan"},
-    {"Atal'Zul", "A'tall'Zul"},
+    -- {"Zul'Farrak", "Zul-Farrack"},
+    -- {"Zul'Gurub", "Zul-Gurub"},
+    -- {"Atal'Gral", "A'tall'Grahl"},
+    -- {"Atal'Dazar", "A'tall'Dahzar"},
+    -- {"Atal'Jani", "A'tall'Jahnee"},
+    -- {"Atal'Kah", "A'tall'Kah"},
+    -- {"Atal'Ma", "A'tall'Mah"},
+    -- {"Atal'Qor", "A'tall'Kor"},
+    -- {"Atal'Raza", "A'tall'Rahzah"},
+    -- {"Atal'Shanar", "A'tall'Shahnar"},         
+    -- {"Atal'Thalar", "A'tall'Thahlar"},
+    -- {"Atal'Voh", "A'tall'Voh"},
+    -- {"Atal'Kaldan", "A'tall'Kaldan"},
+    -- {"Atal'Zul", "A'tall'Zul"},
 
-    {"Mechagon", "Mechah|g%hon"},
+    -- {"Mechagon", "Mechah|g%hon"},
 
-
+    --{"...", "..,"},
 
 
 }
@@ -179,12 +180,17 @@ local function CleanText(text)
     -- Strip WoW colour codes  |cffRRGGBB ... |r
     text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
     -- Replace common zone names with hyphenated versions to improve TTS chunking.
-    text = apply_phonics(text)
+    -- this functionality is moved to the client side for better performance and to preserve original text in the QR payload.
+    -- the addon should not make any assumptions about the text content or structure, as this can vary widely across quests and NPCs. The TTS engine is better equipped to handle phonetic adjustments without risking unintended consequences in the displayed text.
+    --text = apply_phonics(text)  
 
 
     -- Collapse whitespace / newlines
     --text = text:gsub("%s+", " ")
-    text = text:gsub("[ \t\f\v]+", " ")
+
+    -- text = text:gsub("[ \t\f\v]+", " ")
+    -- text = text:gsub("%.%.%.","..")
+    -- text = text:gsub("% %-% "," -- ")
     local m = text   --text:match("^%s*(.-)%s*$") 
 
     return m
@@ -264,6 +270,9 @@ local handlers = {}
 
 handlers.ADDON_LOADED = function(addonName)
     if addonName ~= "RuneReaderVoice" then return end
+        _activeDialogID = nil
+    _questDetailDialogID = nil
+    _questDetailOpen = false
     RuneReaderVoice:InitConfig()
     RuneReaderVoice:CreateQRFrame()
     RuneReaderVoice:CreateConfigPanel()
@@ -318,6 +327,13 @@ handlers.QUEST_DETAIL = function()
     local db = RuneReaderVoiceDB
     if not db or not db.EnableQuestDetail then return end
 
+    -- Ignore repeated QUEST_DETAIL while the same quest-detail window is still open.
+    -- The game can re-fire QUEST_DETAIL periodically without the dialog actually changing.
+    if _questDetailOpen then
+        RuneReaderVoice:Dbg("QUEST_DETAIL: ignored because quest detail is already open")
+        return
+    end
+
     local title     = CleanText(GetTitleText() .. "\n")
     local questText = CleanText(GetQuestText() .. "\n")
     local objective = CleanText(GetObjectiveText() .. "\n")
@@ -334,8 +350,13 @@ handlers.QUEST_DETAIL = function()
     end
 
     RuneReaderVoice:Dbg("QUEST_DETAIL: " .. #combined .. " chars  gender=" .. GetNPCGender())
+
     local did = DispatchDialog(combined)
-    _questDetailDialogID = did
+    if did then
+        _questDetailDialogID = did
+        _questDetailOpen = true
+        RuneReaderVoice:Dbg("QUEST_DETAIL: opened dialog " .. did)
+    end
 end
 
 -- ── Quest progress ────────────────────────────────────────────────────────────
@@ -364,7 +385,15 @@ end
 -- Strategy: 3 second minimum display time, then stop only if dialog unchanged.
 handlers.QUEST_FINISHED = function()
     local dialogAtFinish = _activeDialogID
-    if not dialogAtFinish then return end
+
+    -- Mark quest-detail as closed immediately so the next QUEST_DETAIL can open a new dialog.
+    _questDetailOpen = false
+
+    if not dialogAtFinish then
+        _questDetailDialogID = nil
+        RuneReaderVoice:Dbg("QUEST_FINISHED: no active dialog; quest detail marked closed")
+        return
+    end
 
     RuneReaderVoice:Dbg("QUEST_FINISHED: will stop dialog " .. dialogAtFinish .. " in 3s")
 
@@ -433,6 +462,8 @@ function RuneReaderVoice:HookWindowClose()
             else
                 RuneReaderVoice:StopDisplay()
                 _activeDialogID = nil
+                _questDetailDialogID = nil
+                _questDetailOpen = false
             end
         end)
     end

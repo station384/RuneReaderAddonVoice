@@ -192,7 +192,7 @@ local function UpdateTextures(f, matrix, prevMatrix)
         end
     end
 
-    RuneReaderVoice:Dbg("UpdateTextures: " .. changed .. " of " .. (qrSize*qrSize) .. " modules changed")
+   -- RuneReaderVoice:Dbg("UpdateTextures: " .. changed .. " of " .. (qrSize*qrSize) .. " modules changed")
 end
 
 -- Full (non-diff) texture paint, used for the very first frame of a session.
