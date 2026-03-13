@@ -20,12 +20,12 @@
 -- payload.lua: Segment splitting, chunking, and QR payload encoding
 --
 -- Protocol v04 header (22 ASCII chars):
---   "RV" + VER(2) + DIALOG(4) + IDX(2) + TOTAL(2) + FLAGS(2) + RACE(2) + NPC(6)
+--   "RV" + VER(2) + DIALOG(4) + SEQ(2) + SEQTOTAL(2) + SUB(2) + SUBTOTAL(2) + FLAGS(2) + RACE(2) + NPC(6)
 --
---   DIALOG  : increments per NPC interaction, resets on login. Signals
---             context change (new NPC / new dialog block) to RuneReader.
---   IDX     : 0-based chunk index within this segment.
---   TOTAL   : total chunks in this segment. IDX==TOTAL-1 is the last chunk.
+--   SEQ      : 0-based segment index within this dialog.
+--   SEQTOTAL : total number of segments in this dialog. Known upfront from SplitSegments.
+--   SUB      : 0-based barcode chunk index within this segment.
+--   SUBTOTAL : total barcode chunks for this segment. SUB==SUBTOTAL-1 is the last chunk.
 --   FLAGS   : speaker/control bitmask (see below).
 --   RACE    : NPC race/creature type (see below).
 --   NPC     : NPC ID extracted from the unit GUID (6 hex chars = 24 bits).
@@ -72,7 +72,7 @@ RuneReaderVoice = RuneReaderVoice or {}
 -- ── Protocol constants ────────────────────────────────────────────────────────
 
 local MAGIC           = "RV"
-local PROTOCOL_VER    = "04"    -- bumped: NPC(6) field added, header now 22 chars
+local PROTOCOL_VER    = "05"    -- bumped: SEQ/SEQTOTAL added, IDX→SUB, TOTAL→SUBTOTAL, header now 26 chars
 local WORDS_PER_CHUNK = 50     -- target words per QR chunk
 
 -- Creature type → RACE byte mapping for non-humanoid NPCs
@@ -218,6 +218,38 @@ function RuneReaderVoice:SplitSegments(text)
 
     local segments = {}
 
+
+    -- Quest Title split: If it exists it is always the first line and should be spoken by the narrator. 
+    -- (ASCII SOH — never appears in WoW dialog text). Find it, split there:
+    --   • everything after   → new narrator segment (\1 byte stripped) up to and including the \n
+
+    -- Find the end of the first line first, then look for \1 only within it.
+    local firstLineEnd = text:find("\n", 1, true) or #text
+    local questStart   = text:find("\1", 1, true)
+
+    if questStart and questStart <= firstLineEnd then
+        -- Title text: everything on the first line before the \1 sentinel
+        local titlePart    = text:sub(1, questStart - 1):match("^%s*(.-)%s*$")
+
+        -- Narrator text: everything on the first line after the \1, up to (not including) the \n
+        local narratorPart = text:sub(questStart + 1, firstLineEnd):match("^%s*(.-)%s*$")
+
+        -- Body: everything after the first line's newline (skip the \n itself)
+        text = text:sub(firstLineEnd + 1)
+
+        -- Emit title as narrator (the quest title itself)
+        if titlePart and #titlePart > 0 then
+            table.insert(segments, { text = titlePart, isNarrator = true })
+        end
+
+        -- Emit the inline narrator annotation from the first line (if any)
+        if narratorPart and #narratorPart > 0 then
+            table.insert(segments, { text = narratorPart, isNarrator = true })
+        end
+    end
+
+
+    -- Main quest Body
     -- Walk through text finding <...> spans
     local pos = 1
     while pos <= #text do
@@ -253,25 +285,23 @@ function RuneReaderVoice:SplitSegments(text)
     -- so it will be in the last segment. core.lua prefixes it with a \1 sentinel
     -- (ASCII SOH — never appears in WoW dialog text). Find it, split there:
     --   • everything before  → remains as NPC speech (update last segment, or drop if empty)
-    --   • everything after   → new narrator segment (sentinel byte stripped)
-    -- Handles both "Quest Objective" and "Quest Objectives".
+    --   • everything after   → new narrator segment (\1 byte stripped)
     if #segments > 0 then
-        local lastSeg = segments[#segments]
+        local lastSeg    = segments[#segments]
         local questStart = lastSeg.text:find("\1", 1, true)
         if questStart then
-            -- NPC part: text before the sentinel
-            local npcPart       = lastSeg.text:sub(1, questStart - 1):match("^%s*(.-)%s*$")
-            local afterSentinel = lastSeg.text:sub(questStart)
+            local npcPart = lastSeg.text:sub(1, questStart - 1):match("^%s*(.-)%s*$")
 
-            -- Narrator part: two options — pick whichever sounds better.
-            --
-            -- Option A (strip sentinel): narrator reads only the objective text.
+            -- Narrator part: skip the \1 byte, then trim.
+            -- Two options — pick whichever sounds better.
+            -- Leaving Option B in the code for now so I can flip to either and see how each one "feels" in-game.
+            -- Option A (no announcement): narrator reads only the objective text.
             --   e.g. "Collect 5 apples and return to Thrall."
-            local narratorPart = afterSentinel:sub(2):match("^%s*(.-)%s*$")
+            local narratorPart = lastSeg.text:sub(questStart + 1):match("^%s*(.-)%s*$")
             --
-            -- Option B (keep "Quest Objectives" prefix): narrator announces then reads.
+            -- Option B (with announcement): narrator announces then reads.
             --   e.g. "Quest Objectives. Collect 5 apples and return to Thrall."
-            -- local narratorPart = ("Quest Objectives. " .. afterSentinel:sub(2)):match("^%s*(.-)%s*$")
+            -- local narratorPart = ("Quest Objectives. " .. lastSeg.text:sub(questStart + 1)):match("^%s*(.-)%s*$")
 
             -- Update or remove the last segment
             if npcPart and #npcPart > 0 then
@@ -400,12 +430,12 @@ end
 
 -- ── Build QR strings for a single segment ────────────────────────────────────
 
-local function BuildSegmentQRStrings(dialogID, flags, raceByte, npcID, text)
+local function BuildSegmentQRStrings(dialogID, seq, seqTotal, flags, raceByte, npcID, text)
     local rawChunks   = SplitIntoWordChunks(text)
-    local totalChunks = #rawChunks
-    if totalChunks > 255 then
-        RuneReaderVoice:Dbg("WARNING: clamping " .. totalChunks .. " chunks to 255")
-        totalChunks = 255
+    local subTotal    = #rawChunks
+    if subTotal > 255 then
+        RuneReaderVoice:Dbg("WARNING: clamping " .. subTotal .. " chunks to 255")
+        subTotal = 255
     end
 
     local qrStrings = {}
@@ -413,12 +443,14 @@ local function BuildSegmentQRStrings(dialogID, flags, raceByte, npcID, text)
         local padded  = PadToFixed(rawChunks[i])
         local encoded = Base64Encode(padded)
 
-        -- Header: MAGIC(2) + VER(2) + DIALOG(4) + IDX(2) + TOTAL(2) + FLAGS(2) + RACE(2) + NPC(6) = 22 chars
+        -- Header: MAGIC(2) + VER(2) + DIALOG(4) + SEQ(2) + SEQTOTAL(2) + SUB(2) + SUBTOTAL(2) + FLAGS(2) + RACE(2) + NPC(6) = 26 chars
         local header = MAGIC
             .. PROTOCOL_VER
             .. ToHex4(dialogID)
+            .. ToHex2(seq)
+            .. ToHex2(seqTotal)
             .. ToHex2(i - 1)
-            .. ToHex2(totalChunks)
+            .. ToHex2(subTotal)
             .. ToHex2(flags)
             .. ToHex2(raceByte)
             .. npcID
@@ -426,8 +458,8 @@ local function BuildSegmentQRStrings(dialogID, flags, raceByte, npcID, text)
         table.insert(qrStrings, header .. encoded)
 
         RuneReaderVoice:Dbg(string.format(
-            "Chunk %d/%d dialog=%04X flags=%02X race=%02X npc=%s raw=%d qr=%d",
-            i, totalChunks, dialogID, flags, raceByte, npcID,
+            "Chunk seq=%d/%d sub=%d/%d dialog=%04X flags=%02X race=%02X npc=%s raw=%d qr=%d",
+            seq, seqTotal, i - 1, subTotal, dialogID, flags, raceByte, npcID,
             #rawChunks[i], #header + #encoded
         ))
     end
@@ -448,11 +480,13 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview)
     local raceByte = isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte()
     local npcID    = isPreview and "000000" or RuneReaderVoice:GetNPCID()
     local segments = RuneReaderVoice:SplitSegments(text)
+    local seqTotal = #segments      -- known upfront before any encoding begins
     local sessions = {}
 
-    for _, seg in ipairs(segments) do
+    for seq0, seg in ipairs(segments) do
+        local seq       = seq0 - 1   -- convert to 0-based
         local flags     = RuneReaderVoice:BuildSpeakerFlags(seg.isNarrator, isPreview)
-        local qrStrings = BuildSegmentQRStrings(dialogID, flags, raceByte, npcID, seg.text)
+        local qrStrings = BuildSegmentQRStrings(dialogID, seq, seqTotal, flags, raceByte, npcID, seg.text)
 
         table.insert(sessions, {
             qrStrings  = qrStrings,
@@ -460,27 +494,32 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview)
         })
 
         RuneReaderVoice:Dbg(string.format(
-            "Segment dialog=%04X narrator=%s chunks=%d race=%02X npc=%s",
-            dialogID, tostring(seg.isNarrator), #qrStrings, raceByte, npcID
+            "Segment seq=%d/%d dialog=%04X narrator=%s chunks=%d race=%02X npc=%s",
+            seq, seqTotal, dialogID, tostring(seg.isNarrator), #qrStrings, raceByte, npcID
         ))
+--    print(string.format(
+--             "Segment seq=%d/%d dialog=%04X narrator=%s chunks=%d race=%02X npc=%s",
+--             seq, seqTotal, dialogID, tostring(seg.isNarrator), #qrStrings, raceByte, npcID
+--         ))
+        
     end
 
     return dialogID, sessions
 end
 
--- Legacy single-session builder kept for preview (single-segment text only).
--- Preview text never has <brackets> so no splitting needed.
-function RuneReaderVoice:BuildPayloadChunks(text, isNarrator, isPreview)
-    if not text or #text == 0 then return nil, nil end
+-- -- Legacy single-session builder kept for preview (single-segment text only).
+-- -- Preview text never has <brackets> or objective splits so seqTotal is always 1.
+-- function RuneReaderVoice:BuildPayloadChunks(text, isNarrator, isPreview)
+--     if not text or #text == 0 then return nil, nil end
 
-    local dialogID  = NextDialogID()
-    local flags     = RuneReaderVoice:BuildSpeakerFlags(isNarrator, isPreview)
-    local raceByte  = 0x00      -- preview always unknown race
-    local npcID     = "000000"  -- preview has no NPC
-    local qrStrings = BuildSegmentQRStrings(dialogID, flags, raceByte, npcID, text)
+--     local dialogID  = NextDialogID()
+--     local flags     = RuneReaderVoice:BuildSpeakerFlags(isNarrator, isPreview)
+--     local raceByte  = 0x00      -- preview always unknown race
+--     local npcID     = "000000"  -- preview has no NPC
+--     local qrStrings = BuildSegmentQRStrings(dialogID, 0, 1, flags, raceByte, npcID, text)
 
-    return dialogID, qrStrings
-end
+--     return dialogID, qrStrings
+-- end
 
 -- Measurement helper for /rrv measure command.
 function RuneReaderVoice:MeasureText(text)

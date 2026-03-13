@@ -334,9 +334,18 @@ handlers.QUEST_DETAIL = function()
         return
     end
 
-    local title     = CleanText(GetTitleText() .. "\n")
+    local title     = nil
+    -- Say the title in the narrator voice
+    if (GetTitleText() or "") ~= "" then 
+        title = CleanText("\1" .. GetTitleText() .. "\n")
+    end 
+
+    -- say quest text in NPC voice
     local questText = CleanText(GetQuestText() .. "\n")
+    --print ("GetQuestText: [" .. tostring(questText) .. "]")
     local objective = nil
+    
+    -- say the objective text in the narrator voice, if it exists. Many quests don't have this field, and it's often redundant with the quest text, so it's better to skip it when empty.
     if (GetObjectiveText() or "") ~= "" then
          objective = CleanText("\1" .. GetObjectiveText() .. "\n")
     end

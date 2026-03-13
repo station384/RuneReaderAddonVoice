@@ -115,6 +115,7 @@ function RuneReaderVoice:DestroyQRFrame()
     _chunkIndex      = 1
     _prevMatrix      = nil
     _segmentQueue    = {}
+    _segmentIndex    = 1
     _currentDialogID = nil
 end
 
@@ -258,10 +259,39 @@ end
 --
 -- Queue state lives here as upvalue locals alongside the existing display state.
 
-local _segmentQueue    = {}    -- array of { qrStrings }  pending segments
+local _segmentQueue    = {}    -- stable array of { qrStrings } for the active dialog
+local _segmentIndex    = 1     -- 1-based Lua index into _segmentQueue
 local _currentDialogID = nil   -- dialogID of the active queue; used to cancel on stop
 
--- Advance to the next segment in the queue, or loop current if queue is empty.
+-- Protocol indexing reminder:
+--   SEQ and SUB inside the QR payload are 0-based indexes.
+--   SEQTOTAL and SUBTOTAL are counts, not max indexes.
+--
+-- Display state here uses normal Lua 1-based array indexes for tables, but the
+-- logical playback order must still mirror the protocol hierarchy:
+--   advance SUB within the current SEQ first
+--   then advance to the next SEQ
+--   after the last SUB of the last SEQ, wrap back to the first SEQ/SUB and
+--   repeat the entire dialog while it remains on screen.
+
+-- Start the currently selected segment from the active dialog queue.
+local function StartCurrentSegment()
+    local current = _segmentQueue[_segmentIndex]
+    if not current then
+        RuneReaderVoice:Dbg("SegmentQueue: no current segment, display done")
+        RuneReaderVoice:StopDisplay()
+        return
+    end
+
+    RuneReaderVoice:Dbg(string.format(
+        "SegmentQueue: starting segment %d/%d (%d chunks)",
+        _segmentIndex, #_segmentQueue, #current.qrStrings
+    ))
+    RuneReaderVoice:StartDisplay(current.qrStrings)
+end
+
+-- Advance to the next top-level SEQ in the active dialog, wrapping to the first
+-- SEQ after the final SEQ so the whole dialog repeats.
 local function AdvanceSegmentQueue()
     if #_segmentQueue == 0 then
         RuneReaderVoice:Dbg("SegmentQueue: empty, display done")
@@ -269,24 +299,28 @@ local function AdvanceSegmentQueue()
         return
     end
 
-    local next = table.remove(_segmentQueue, 1)
-    RuneReaderVoice:Dbg(string.format(
-        "SegmentQueue: starting segment (%d chunks, %d remaining in queue)",
-        #next.qrStrings, #_segmentQueue
-    ))
-    RuneReaderVoice:StartDisplay(next.qrStrings)
+    _segmentIndex = _segmentIndex + 1
+    if _segmentIndex > #_segmentQueue then
+        _segmentIndex = 1
+    end
+
+    StartCurrentSegment()
 end
 
 -- StartDisplaySessions: entry point for multi-segment dialog blocks.
--- Called by core.lua DispatchDialog. Queues all segments and kicks off the first.
+-- Called by core.lua DispatchDialog. Stores the full dialog block and kicks off
+-- the first segment. Unlike the older one-shot queue, this state is stable so
+-- the full dialog can wrap back to SEQ 0 after the last SEQ completes.
 function RuneReaderVoice:StartDisplaySessions(dialogID, sessions)
     if not sessions or #sessions == 0 then return end
 
     -- Cancel any previous queue
     _segmentQueue    = {}
+    _segmentIndex    = 1
     _currentDialogID = dialogID
 
-    -- Queue all segments
+    -- Store all segments in order. These correspond to payload SEQ values in
+    -- ascending order, but are stored as 1-based Lua array entries.
     for _, sess in ipairs(sessions) do
         table.insert(_segmentQueue, {
             qrStrings = sess.qrStrings,
@@ -297,7 +331,7 @@ function RuneReaderVoice:StartDisplaySessions(dialogID, sessions)
         "StartDisplaySessions: dialog=%04X segments=%d", dialogID, #_segmentQueue
     ))
 
-    AdvanceSegmentQueue()
+    StartCurrentSegment()
 end
 
 -- ── Public: start / stop display ─────────────────────────────────────────────
@@ -356,10 +390,11 @@ function RuneReaderVoice:StartDisplay(chunks)
     f:Show()
     _displayActive = true
 
-    -- Cycles through chunks sequentially. When the last chunk of a segment is
-    -- reached, advances to the next queued segment immediately. The final segment
-    -- (or a single-segment dialog) loops forever until stopped externally
-    -- by an OnHide hook or QUEST_FINISHED.
+    -- Cycles through SUB chunks sequentially within the current SEQ segment.
+    -- When the last SUB of the current SEQ is reached, advance to the next SEQ.
+    -- After the last SUB of the last SEQ, wrap back to the first SEQ so the
+    -- entire dialog repeats until stopped externally by an OnHide hook or
+    -- QUEST_FINISHED.
     f:SetScript("OnUpdate", function(self, elapsed)
         if not _displayActive then return end
 
@@ -370,12 +405,16 @@ function RuneReaderVoice:StartDisplay(chunks)
         _chunkIndex = _chunkIndex + 1
 
         if _chunkIndex > _numChunks then
-            if #_segmentQueue > 0 then
+            if #_segmentQueue > 1 then
                 _displayActive = false
                 AdvanceSegmentQueue()
                 return
-            else
+            elseif #_segmentQueue == 1 then
                 _chunkIndex = 1
+            else
+                RuneReaderVoice:Dbg("SegmentQueue: empty during chunk advance, stopping")
+                RuneReaderVoice:StopDisplay()
+                return
             end
         end
 
@@ -393,6 +432,7 @@ function RuneReaderVoice:StopDisplay()
     _numChunks       = 0
     _prevMatrix      = nil
     _segmentQueue    = {}
+    _segmentIndex    = 1
     _currentDialogID = nil
     local f = RuneReaderVoice.QRFrame
     if f then
