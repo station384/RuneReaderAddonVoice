@@ -86,6 +86,7 @@ local EVENTS = {
     "TAXIMAP_CLOSED",
     "ADVENTURE_MAP_CLOSE",
     "MERCHANT_CLOSED",
+    "TRAINER_CLOSED"
 }
 
 for _, ev in ipairs(EVENTS) do
@@ -311,7 +312,7 @@ end
 handlers.TAXIMAP_CLOSED        = function() StopOnFrameClose("TAXIMAP_CLOSED") end
 handlers.ADVENTURE_MAP_CLOSE   = function() StopOnFrameClose("ADVENTURE_MAP_CLOSE") end
 handlers.MERCHANT_CLOSED       = function() StopOnFrameClose("MERCHANT_CLOSED") end
-
+handlers.TRAINER_CLOSED       = function() StopOnFrameClose("TRAINER_CLOSED") end
 -- ── Quest greeting (multi-quest NPC) ─────────────────────────────────────────
 handlers.QUEST_GREETING = function()
     local db = RuneReaderVoiceDB
