@@ -117,6 +117,7 @@ function RuneReaderVoice:DestroyQRFrame()
     _segmentQueue    = {}
     _segmentIndex    = 1
     _currentDialogID = nil
+    _buildQueue      = {}
 end
 
 -- ── Texture pool management ───────────────────────────────────────────────────
@@ -259,9 +260,10 @@ end
 --
 -- Queue state lives here as upvalue locals alongside the existing display state.
 
-local _segmentQueue    = {}    -- stable array of { qrStrings, matrices } for the active dialog
+local _segmentQueue    = {}    -- stable array of { qrStrings } for the active dialog
 local _segmentIndex    = 1     -- 1-based Lua index into _segmentQueue
 local _currentDialogID = nil   -- dialogID of the active queue; used to cancel on stop
+local _buildQueue      = {}    -- background QR build queue for incremental pre-encode
 
 -- Protocol indexing reminder:
 --   SEQ and SUB inside the QR payload are 0-based indexes.
@@ -275,6 +277,65 @@ local _currentDialogID = nil   -- dialogID of the active queue; used to cancel o
 --   repeat the entire dialog while it remains on screen.
 
 -- Start the currently selected segment from the active dialog queue.
+local function BuildOneMatrixForSession(sess)
+    if not sess or sess.buildComplete then return false end
+
+    local startIndex = sess.buildIndex or 1
+    local qrStrings  = sess.qrStrings
+    local matrices   = sess.matrices
+
+    for i = startIndex, #qrStrings do
+        if not matrices[i] then
+            local matrix = EncodeQR(qrStrings[i])
+            if matrix then
+                matrices[i] = matrix
+            end
+            sess.buildIndex = i + 1
+            if sess.buildIndex > #qrStrings then
+                sess.buildComplete = true
+            end
+            return true
+        end
+    end
+
+    sess.buildComplete = true
+    sess.buildIndex = #qrStrings + 1
+    return false
+end
+
+local function BuildMatricesBudget(maxWorkMs)
+    if not _buildQueue or #_buildQueue == 0 then return end
+
+    local t0 = debugprofilestop and debugprofilestop() or nil
+    local built = 0
+
+    while #_buildQueue > 0 do
+        local sess = _buildQueue[1]
+        if sess.buildComplete then
+            table.remove(_buildQueue, 1)
+        else
+            local didBuild = BuildOneMatrixForSession(sess)
+            if didBuild then
+                built = built + 1
+            end
+            if sess.buildComplete then
+                table.remove(_buildQueue, 1)
+            end
+
+            if didBuild then
+                if not t0 or not maxWorkMs then
+                    break
+                end
+                if (debugprofilestop() - t0) >= maxWorkMs then
+                    break
+                end
+            else
+                break
+            end
+        end
+    end
+end
+
 local function StartCurrentSegment()
     local current = _segmentQueue[_segmentIndex]
     if not current then
@@ -287,7 +348,7 @@ local function StartCurrentSegment()
         "SegmentQueue: starting segment %d/%d (%d chunks)",
         _segmentIndex, #_segmentQueue, #current.qrStrings
     ))
-    RuneReaderVoice:StartDisplay(current.qrStrings, current.matrices)
+    RuneReaderVoice:StartDisplay(current)
 end
 
 -- Advance to the next top-level SEQ in the active dialog, wrapping to the first
@@ -318,30 +379,21 @@ function RuneReaderVoice:StartDisplaySessions(dialogID, sessions)
     _segmentQueue    = {}
     _segmentIndex    = 1
     _currentDialogID = dialogID
+    _buildQueue      = {}
 
     -- Store all segments in order. These correspond to payload SEQ values in
-    -- ascending order, but are stored as 1-based Lua array entries.
-    --
-    -- Phase 1 performance cache:
-    --   Pre-encode each segment's QR matrices once when the dialog block starts
-    --   and keep them with the active queue entry. This avoids re-running the
-    --   pure-Lua QR encoder every time a segment rolls over or the dialog wraps.
+    -- ascending order, but are stored as 1-based Lua array entries. Matrices are
+    -- built lazily: the first visible chunk is encoded immediately and the rest are
+    -- encoded incrementally over later frames to smooth the initial hitch.
     for _, sess in ipairs(sessions) do
-        local matrices = {}
-        local qrStrings = sess.qrStrings or {}
-
-        for i, chunkStr in ipairs(qrStrings) do
-            local matrix = EncodeQR(chunkStr)
-            if not matrix then
-                RuneReaderVoice:Dbg("  session pre-encode chunk " .. i .. " FAILED, will retry on display")
-            end
-            matrices[i] = matrix
-        end
-
-        table.insert(_segmentQueue, {
-            qrStrings = qrStrings,
-            matrices  = matrices,
-        })
+        local entry = {
+            qrStrings     = sess.qrStrings,
+            matrices      = {},
+            buildIndex    = 1,
+            buildComplete = false,
+        }
+        table.insert(_segmentQueue, entry)
+        table.insert(_buildQueue, entry)
     end
 
     RuneReaderVoice:Dbg(string.format(
@@ -353,10 +405,10 @@ end
 
 -- ── Public: start / stop display ─────────────────────────────────────────────
 
--- StartDisplay uses prebuilt matrices when supplied by StartDisplaySessions.
--- If matrices are not supplied, it falls back to encoding from chunk strings.
-function RuneReaderVoice:StartDisplay(chunks, prebuiltMatrices)
-    if not chunks or #chunks == 0 then return end
+-- StartDisplay makes the first QR available immediately, then lets the active
+-- OnUpdate build the remaining matrices incrementally in small time slices.
+function RuneReaderVoice:StartDisplay(segment)
+    if not segment or not segment.qrStrings or #segment.qrStrings == 0 then return end
 
     -- Stop any previous OnUpdate before rebuilding state
     local f = RuneReaderVoice.QRFrame
@@ -369,42 +421,25 @@ function RuneReaderVoice:StartDisplay(chunks, prebuiltMatrices)
     _prevMatrix    = nil
     _displayTime   = (RuneReaderVoiceDB and RuneReaderVoiceDB.ChunkDisplayTime) or 0.10
 
-    _numChunks = #chunks
+    local chunks = segment.qrStrings
+    _matrices   = segment.matrices or {}
+    _numChunks  = #chunks
 
-    if prebuiltMatrices then
-        RuneReaderVoice:Dbg(string.format(
-            "StartDisplay chunks=%d  using cached matrices", _numChunks
-        ))
-        for i = 1, _numChunks do
-            local matrix = prebuiltMatrices[i]
-            if matrix then
-                _matrices[i] = matrix
-            else
-                local chunkStr = chunks[i]
-                local rebuilt = EncodeQR(chunkStr)
-                if not rebuilt then
-                    RuneReaderVoice:Dbg("  cached matrix missing and rebuild FAILED for chunk " .. i)
-                end
-                _matrices[i] = rebuilt
-            end
-        end
-    else
-        RuneReaderVoice:Dbg(string.format(
-            "StartDisplay chunks=%d  pre-encoding...", _numChunks
-        ))
+    RuneReaderVoice:Dbg(string.format(
+        "StartDisplay chunks=%d  immediate first-QR encode, background build for rest", _numChunks
+    ))
 
+    if not _matrices[1] then
         local t0 = debugprofilestop and debugprofilestop() or 0
-        for i, chunkStr in ipairs(chunks) do
-            local matrix = EncodeQR(chunkStr)
-            if not matrix then
-                RuneReaderVoice:Dbg("  chunk " .. i .. " encode FAILED, skipping")
-            end
-            _matrices[i] = matrix
+        _matrices[1] = EncodeQR(chunks[1])
+        segment.buildIndex = 2
+        if _numChunks <= 1 then
+            segment.buildComplete = true
         end
         if debugprofilestop then
             RuneReaderVoice:Dbg(string.format(
-                "  pre-encode done: %.1f ms for %d chunks",
-                debugprofilestop() - t0, _numChunks
+                "  first matrix ready: %.1f ms",
+                debugprofilestop() - t0
             ))
         end
     end
@@ -435,6 +470,8 @@ function RuneReaderVoice:StartDisplay(chunks, prebuiltMatrices)
     f:SetScript("OnUpdate", function(self, elapsed)
         if not _displayActive then return end
 
+        BuildMatricesBudget(1.5)
+
         _chunkTimer = _chunkTimer + elapsed
         if _chunkTimer < _displayTime then return end
         _chunkTimer = 0.0
@@ -456,6 +493,16 @@ function RuneReaderVoice:StartDisplay(chunks, prebuiltMatrices)
         end
 
         local matrix = _matrices[_chunkIndex]
+        if not matrix then
+            matrix = EncodeQR(chunks[_chunkIndex])
+            _matrices[_chunkIndex] = matrix
+            if _chunkIndex >= (segment.buildIndex or 1) then
+                segment.buildIndex = _chunkIndex + 1
+            end
+            if segment.buildIndex > _numChunks then
+                segment.buildComplete = true
+            end
+        end
         if not matrix then return end
 
         UpdateTextures(self, matrix, _prevMatrix)
@@ -471,6 +518,7 @@ function RuneReaderVoice:StopDisplay()
     _segmentQueue    = {}
     _segmentIndex    = 1
     _currentDialogID = nil
+    _buildQueue      = {}
     local f = RuneReaderVoice.QRFrame
     if f then
         f:SetScript("OnUpdate", nil)
