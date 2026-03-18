@@ -299,16 +299,14 @@ handlers.GOSSIP_SHOW = function(arg1)
     end)
 end
 
-handlers.GOSSIP_CLOSED = function()
-    -- No action. Cleanup handled by GossipFrame:OnHide hook.
-end
+
 
 local function StopOnFrameClose(eventName)
     RuneReaderVoice:Dbg(eventName .. " -> StopDisplay")
     RuneReaderVoice:StopDisplay()
     _activeDialogID = nil
 end
-
+handlers.GOSSIP_CLOSED = function() StopOnFrameClose("GOSSIP_CLOSED") end
 handlers.TAXIMAP_CLOSED        = function() StopOnFrameClose("TAXIMAP_CLOSED") end
 handlers.ADVENTURE_MAP_CLOSE   = function() StopOnFrameClose("ADVENTURE_MAP_CLOSE") end
 handlers.MERCHANT_CLOSED       = function() StopOnFrameClose("MERCHANT_CLOSED") end
