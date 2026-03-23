@@ -86,7 +86,11 @@ local EVENTS = {
     "TAXIMAP_CLOSED",
     "ADVENTURE_MAP_CLOSE",
     "MERCHANT_CLOSED",
-    "TRAINER_CLOSED"
+    "TRAINER_CLOSED",
+    "BANKFRAME_CLOSED",
+    "MAIL_CLOSED",
+    "AUCTION_HOUSE_CLOSED",
+    "LOOT_CLOSED"
 }
 
 for _, ev in ipairs(EVENTS) do
@@ -99,6 +103,11 @@ local _activeDialogID       = nil   -- dialogID of whatever is currently display
 local _questDetailDialogID  = nil   -- dialogID started by the last QUEST_DETAIL
 local _questDetailOpen      = false -- true only while a QUEST_DETAIL dialog is considered open
 local _bookActive           = false
+local _bookScanning         = false -- true while collecting all pages before dispatch
+local _bookNavigating       = 0     -- pages to skip during back-navigation after scan
+local _bookDispatched       = false -- true after scan-mode dispatch; suppresses duplicate ITEM_TEXT_READY
+local _bookPages            = {}    -- collected page texts during scan
+local _bookSource           = nil   -- item name from first page
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -301,16 +310,45 @@ end
 
 
 
+-- Immediate stop — unambiguous frame close, no new dialog expected imminently.
 local function StopOnFrameClose(eventName)
     RuneReaderVoice:Dbg(eventName .. " -> StopDisplay")
     RuneReaderVoice:StopDisplay()
     _activeDialogID = nil
 end
-handlers.GOSSIP_CLOSED = function() StopOnFrameClose("GOSSIP_CLOSED") end
+
+-- Delayed stop — frame may briefly hide/reshow (e.g. gossip option navigation).
+-- Uses same 3s guard pattern as QUEST_FINISHED: only stops if the dialog hasn't
+-- changed by the time the timer fires.
+local function StopOnFrameCloseDelayed(eventName, delay)
+    local dialogAtClose = _activeDialogID
+    if not dialogAtClose then return end
+    RuneReaderVoice:Dbg(eventName .. " -> deferred stop in " .. delay .. "s for dialog " .. dialogAtClose)
+    C_Timer.After(delay, function()
+        if _activeDialogID == dialogAtClose then
+            RuneReaderVoice:StopDisplay()
+            _activeDialogID = nil
+            RuneReaderVoice:Dbg(eventName .. " -> deferred stop fired")
+        else
+            RuneReaderVoice:Dbg(eventName .. " -> deferred stop cancelled (dialog changed)")
+        end
+    end)
+end
+
+-- GOSSIP_CLOSED fires on every gossip option navigation, not just final close.
+-- Use a short delay so a new GOSSIP_SHOW (which sets a new _activeDialogID) can
+-- arrive and cancel the stop before it fires.
+handlers.GOSSIP_CLOSED         = function() StopOnFrameCloseDelayed("GOSSIP_CLOSED", 0.5) end
 handlers.TAXIMAP_CLOSED        = function() StopOnFrameClose("TAXIMAP_CLOSED") end
 handlers.ADVENTURE_MAP_CLOSE   = function() StopOnFrameClose("ADVENTURE_MAP_CLOSE") end
 handlers.MERCHANT_CLOSED       = function() StopOnFrameClose("MERCHANT_CLOSED") end
-handlers.TRAINER_CLOSED       = function() StopOnFrameClose("TRAINER_CLOSED") end
+handlers.TRAINER_CLOSED        = function() StopOnFrameClose("TRAINER_CLOSED") end
+handlers.BANKFRAME_CLOSED      = function() StopOnFrameClose("BANKFRAME_CLOSED") end
+handlers.MAIL_CLOSED           = function() StopOnFrameClose("MAIL_CLOSED") end
+handlers.AUCTION_HOUSE_CLOSED  = function() StopOnFrameClose("AUCTION_HOUSE_CLOSED") end
+handlers.LOOT_CLOSED           = function() StopOnFrameClose("LOOT_CLOSED") end
+-- QUEST_LOG_UPDATE fires too frequently for reliable close detection and is
+-- covered by the QuestFrame:OnHide hook in HookWindowClose.
 -- ── Quest greeting (multi-quest NPC) ─────────────────────────────────────────
 handlers.QUEST_GREETING = function()
     local db = RuneReaderVoiceDB
@@ -419,10 +457,33 @@ handlers.QUEST_FINISHED = function()
 end
 
 -- ── Books ─────────────────────────────────────────────────────────────────────
--- NOTE: Multi-page books require the player to click through pages manually.
--- Each page triggers ITEM_TEXT_READY independently. This is a known limitation.
+-- Full-scan strategy: on ITEM_TEXT_BEGIN, scan all pages by calling
+-- ItemTextNextPage() to collect every page's text, then navigate back to
+-- page 1 and dispatch the full book as a single dialog.
+-- The player sees the QR appear on page 1 with the complete text already
+-- encoded — no need to click through pages to hear the whole book.
+--
+-- Scan state machine:
+--   _bookScanning = true  → ITEM_TEXT_READY collects text, advances to next page
+--   _bookScanning = false → ITEM_TEXT_READY in normal display mode (ignored, text
+--                           already dispatched from scan)
+
 handlers.ITEM_TEXT_BEGIN = function()
-    _bookActive = true
+    local db = RuneReaderVoiceDB
+    if not db or not db.EnableBooks then return end
+
+    _bookActive   = true
+    _bookPages    = {}
+    _bookSource   = nil
+
+    if db.BookScanMode then
+        _bookScanning = true
+        RuneReaderVoice:Dbg("ITEM_TEXT_BEGIN: full-scan mode starting")
+    else
+        _bookScanning = false
+        RuneReaderVoice:Dbg("ITEM_TEXT_BEGIN: per-page mode")
+    end
+    -- ITEM_TEXT_READY fires immediately after for the first page.
 end
 
 handlers.ITEM_TEXT_READY = function()
@@ -431,23 +492,113 @@ handlers.ITEM_TEXT_READY = function()
     if not _bookActive then return end
 
     local text   = CleanText(ItemTextGetText())
-    local source = CleanText(ItemTextGetItem())
+    local pageNum = (ItemTextGetPage and ItemTextGetPage()) or 1
+
+    if _bookScanning then
+        -- Scan mode: collect this page and advance
+        if not text or #text == 0 then
+            RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): empty page " .. pageNum .. ", ending scan")
+            -- treat as last page
+        else
+            if pageNum == 1 then
+                _bookSource = CleanText(ItemTextGetItem())
+            end
+            RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): collected page " .. pageNum .. " (" .. #text .. " chars)")
+            table.insert(_bookPages, text)
+        end
+
+        -- Try to advance to next page
+        local hasNext = ItemTextNextPage and ItemTextNextPage()
+        if hasNext then
+            -- ITEM_TEXT_READY will fire again for the next page
+            RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): advancing to next page")
+            return
+        end
+
+        -- No more pages — scan complete. Now navigate back to page 1.
+        RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): scan complete, " .. #_bookPages .. " pages collected")
+        _bookScanning = false
+
+        -- Navigate back to page 1 if we advanced past it.
+        -- ItemTextPrevPage() is available in modern WoW clients.
+        -- _bookNavigating suppresses the ITEM_TEXT_READY that fires on the next
+        -- frame as a result of the programmatic navigation.
+        if pageNum > 1 then
+            if ItemTextPrevPage then
+                -- Each PrevPage call may fire ITEM_TEXT_READY; suppress them all.
+                _bookNavigating = pageNum - 1
+                for _ = 1, pageNum - 1 do
+                    ItemTextPrevPage()
+                end
+                RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): navigating back " .. (pageNum-1) .. " page(s)")
+            else
+                RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): ItemTextPrevPage unavailable, staying on last page")
+            end
+        end
+
+        -- Assemble full book text and dispatch
+        if #_bookPages == 0 then
+            RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): no pages collected, aborting")
+            return
+        end
+
+        local parts = {}
+        if _bookSource and #_bookSource > 0 then
+            table.insert(parts, "\1" .. _bookSource .. "\n")
+        end
+        for _, pageText in ipairs(_bookPages) do
+            table.insert(parts, pageText)
+        end
+
+        local full = table.concat(parts, "\n\n")
+        RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): dispatching " .. #full .. " chars (" .. #_bookPages .. " pages)")
+        DispatchDialog(full)
+
+        -- Suppress any further ITEM_TEXT_READY until user manually turns page
+        _bookDispatched = true
+
+        -- Clear scan state
+        _bookPages  = {}
+        _bookSource = nil
+        return
+    end
+
+    -- Suppress ITEM_TEXT_READY events that fire during programmatic back-navigation.
+    if _bookNavigating > 0 then
+        _bookNavigating = _bookNavigating - 1
+        RuneReaderVoice:Dbg("ITEM_TEXT_READY: suppressed (back-nav, remaining=" .. _bookNavigating .. ")")
+        return
+    end
+
+    -- Suppress duplicate ITEM_TEXT_READY events WoW fires after scan-mode dispatch.
+    -- _bookDispatched is cleared when the user manually turns a page (pageNum changes).
+    if _bookDispatched then
+        RuneReaderVoice:Dbg("ITEM_TEXT_READY: suppressed (already dispatched page " .. pageNum .. ")")
+        return
+    end
+
+    -- Per-page mode (BookScanMode disabled): dispatch each page as shown.
     if not text or #text == 0 then return end
-
-    local pageNum = ItemTextGetPage and ItemTextGetPage() or 1
+    local source = CleanText(ItemTextGetItem())
     local full = (pageNum == 1 and source and #source > 0)
-        and (source .. ".  " .. text)
+        and ("\1" .. source .. "\n" .. text)
         or  text
-
-    -- Books are always narrator - no live NPC unit token available
-    RuneReaderVoice:Dbg("ITEM_TEXT_READY: " .. #full .. " chars (page " .. pageNum .. ")")
+    -- User manually navigated — clear dispatched flag so future pages are processed
+    _bookDispatched = false
+    RuneReaderVoice:Dbg("ITEM_TEXT_READY (per-page): page " .. pageNum .. " (" .. #full .. " chars)")
     DispatchDialog(full)
 end
 
 handlers.ITEM_TEXT_CLOSED = function()
-    _bookActive = false
+    _bookActive      = false
+    _bookScanning    = false
+    _bookNavigating  = 0
+    _bookDispatched  = false
+    _bookPages       = {}
+    _bookSource      = nil
     RuneReaderVoice:StopDisplay()
     _activeDialogID = nil
+    RuneReaderVoice:Dbg("ITEM_TEXT_CLOSED")
 end
 
 -- ── Window close hooks ───────────────────────────────────────────────────────
@@ -457,9 +608,11 @@ function RuneReaderVoice:HookWindowClose()
     if GossipFrame then
         GossipFrame:HookScript("OnHide", function()
             if RuneReaderVoice:IsPreviewActive() then return end
-            RuneReaderVoice:Dbg("GossipFrame:OnHide -> StopDisplay")
-            RuneReaderVoice:StopDisplay()
-            _activeDialogID = nil
+            -- Use delayed stop — gossip frame hides briefly during option navigation
+            -- before reshowing with the same or a new NPC dialog. The 0.5s delay
+            -- allows a new GOSSIP_SHOW to arrive and set a new _activeDialogID,
+            -- which cancels the deferred stop before it fires.
+            StopOnFrameCloseDelayed("GossipFrame:OnHide", 0.5)
         end)
     end
 

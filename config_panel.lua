@@ -85,6 +85,9 @@ function RuneReaderVoice:CreateConfigPanel()
         "Read quest reward text", true)
     AddCheckbox("EnableBooks",         "Voice In-Game Books",
         "Read in-game books and readable items (experimental)", false)
+    AddCheckbox("BookScanMode",        "  Scan Full Book on Open",
+        "Scan all pages when a book opens, then read the full text from page 1. "
+        .. "Disable to read one page at a time as you click through.", true)
 
     -- ── Speaker ───────────────────────────────────────────────────────────────
     AddCheckbox("UseVoiceChatGender", "Detect NPC Gender",

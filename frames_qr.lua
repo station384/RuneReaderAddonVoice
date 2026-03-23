@@ -470,7 +470,7 @@ function RuneReaderVoice:StartDisplay(segment)
     f:SetScript("OnUpdate", function(self, elapsed)
         if not _displayActive then return end
 
-        BuildMatricesBudget(1.5)
+        BuildMatricesBudget(1)
 
         _chunkTimer = _chunkTimer + elapsed
         if _chunkTimer < _displayTime then return end

@@ -53,6 +53,7 @@ RuneReaderVoice.defaultConfig = {
     EnableQuestProgress = true, -- voice quest progress text
     EnableQuestReward   = true, -- voice quest reward text
     EnableBooks         = false, -- voice in-game books (ITEM_TEXT) - Phase 2
+    BookScanMode        = true,  -- scan all pages on open before dispatch; false = one page at a time
 
     -- Debug
     DEBUG = false,

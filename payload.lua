@@ -253,9 +253,13 @@ function RuneReaderVoice:SplitSegments(text)
     -- Walk through text finding <...> spans
     local pos = 1
     while pos <= #text do
-        local bracketStart, bracketEnd = text:find("<(.-)>", pos)
+        -- Use [^>]* instead of .- so the pattern matches across newlines.
+        -- Lua's . does not match \n by default, so multi-line <...> spans would
+        -- break the parse and cause segments to be dropped.
+        local bracketStart = text:find("<", pos, true)
+        local bracketEnd   = bracketStart and text:find(">", bracketStart + 1, true)
 
-        if bracketStart then
+        if bracketStart and bracketEnd then
             -- NPC speech before the bracket (if any)
             if bracketStart > pos then
                 local before = text:sub(pos, bracketStart - 1):match("^%s*(.-)%s*$")
@@ -497,10 +501,11 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview)
             "Segment seq=%d/%d dialog=%04X narrator=%s chunks=%d race=%02X npc=%s",
             seq, seqTotal, dialogID, tostring(seg.isNarrator), #qrStrings, raceByte, npcID
         ))
---    print(string.format(
---             "Segment seq=%d/%d dialog=%04X narrator=%s chunks=%d race=%02X npc=%s",
---             seq, seqTotal, dialogID, tostring(seg.isNarrator), #qrStrings, raceByte, npcID
---         ))
+    print(string.format(
+             "[RRV] Segment seq=%d/%d dialog=%04X narrator=%s chunks=%d race=%02X npc=%s text=|%s|",
+             seq, seqTotal, dialogID, tostring(seg.isNarrator), #qrStrings, raceByte, npcID,
+             seg.text:sub(1, 60)
+         ))
         
     end
 
