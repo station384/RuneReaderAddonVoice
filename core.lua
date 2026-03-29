@@ -206,10 +206,33 @@ local function CleanText(text)
     return m
 end
 
+
+local function NormalizeBookKeyPart(s)
+    s = CleanText(s or "") or ""
+    s = s:upper()
+    s = s:gsub("%s+", " ")
+    return s
+end
+
+local function HashBookIdentity24(s)
+    local h = 2166136261
+    for i = 1, #s do
+        h = (h * 16777619 + string.byte(s, i)) % 4294967296
+    end
+    return h % 16777216
+end
+
+local function BuildBookIdentityHex(title, firstPageText)
+    local key = "BOOK|" .. NormalizeBookKeyPart(title) .. "|" .. NormalizeBookKeyPart(firstPageText)
+    local value = HashBookIdentity24(key)
+    value = 0xF00000 + (value % 0x100000)  -- reserve Fxxxxx range for synthetic book identities
+    return string.format("%06X", value)
+end
+
 -- DispatchDialog: split text into narrator/NPC segments, build QR sessions,
 -- hand all sessions to StartDisplaySessions for cycling.
 -- Returns: dialogID (for QUEST_FINISHED guard) or nil on empty text.
-local function DispatchDialog(text)
+local function DispatchDialog(text, npcIDOverride, raceByteOverride)
     text = CleanText(text)
     if not text or #text == 0 then return nil end
 
@@ -222,7 +245,7 @@ local function DispatchDialog(text)
         ))
     end
 
-    local dialogID, sessions = RuneReaderVoice:BuildDialogSessions(text, false)
+    local dialogID, sessions = RuneReaderVoice:BuildDialogSessions(text, false, npcIDOverride, raceByteOverride)
     if not sessions or #sessions == 0 then
         RuneReaderVoice:Dbg("BuildDialogSessions returned empty")
         return nil
@@ -235,6 +258,81 @@ local function DispatchDialog(text)
     _activeDialogID = dialogID
     RuneReaderVoice:StartDisplaySessions(dialogID, sessions)
     return dialogID
+end
+
+-- ── NPC info helpers ──────────────────────────────────────────────────────────
+
+
+
+local function DispatchStructuredDialog(segments, npcIDOverride, raceByteOverride)
+    if not segments or #segments == 0 then return nil end
+
+    local cleaned = {}
+    local totalLen = 0
+    for _, seg in ipairs(segments) do
+        local text = seg and seg.text or nil
+        if text then
+            text = CleanText(text)
+        end
+        if text and #text > 0 then
+            totalLen = totalLen + #text
+            table.insert(cleaned, { text = text, isNarrator = not not seg.isNarrator })
+        end
+    end
+
+    if #cleaned == 0 then return nil end
+
+    local db = RuneReaderVoiceDB
+    if db and db.DEBUG then
+        RuneReaderVoice:Dbg(string.format(
+            "DispatchStructured: segments=%d raw=%d",
+            #cleaned, totalLen
+        ))
+    end
+
+    local dialogID, sessions = RuneReaderVoice:BuildDialogSessionsFromSegments(cleaned, false, npcIDOverride, raceByteOverride)
+    if not sessions or #sessions == 0 then
+        RuneReaderVoice:Dbg("BuildDialogSessionsFromSegments returned empty")
+        return nil
+    end
+
+    RuneReaderVoice:Dbg(string.format(
+        "Dialog %04X: %d structured segment(s)", dialogID, #sessions
+    ))
+
+    _activeDialogID = dialogID
+    RuneReaderVoice:StartDisplaySessions(dialogID, sessions)
+    return dialogID
+end
+
+local function SplitQuestDetailBodySegments(text)
+    local segments = {}
+    if not text or #text == 0 then return segments end
+
+    local pos = 1
+    while pos <= #text do
+        local s, e, inner = text:find("<(.-)>", pos)
+        if s then
+            if s > pos then
+                local npcText = text:sub(pos, s - 1)
+                if #npcText > 0 then
+                    table.insert(segments, { text = npcText, isNarrator = false })
+                end
+            end
+            if inner and #inner > 0 then
+                table.insert(segments, { text = inner, isNarrator = true })
+            end
+            pos = e + 1
+        else
+            local tail = text:sub(pos)
+            if #tail > 0 then
+                table.insert(segments, { text = tail, isNarrator = false })
+            end
+            break
+        end
+    end
+
+    return segments
 end
 
 -- ── NPC info helpers ──────────────────────────────────────────────────────────
@@ -371,42 +469,48 @@ handlers.QUEST_DETAIL = function()
         return
     end
 
-    local title     = nil
-    -- Say the title in the narrator voice
-    if (GetTitleText() or "") ~= "" then 
-        title = CleanText("\1 " .. GetTitleText() .. ". \n")
-    end 
+    local segments = {}
 
-    -- say quest text in NPC voice
-    local questText = CleanText(GetQuestText() .. "\n")
-    --print ("GetQuestText: [" .. tostring(questText) .. "]")
-    local objective = nil
-    
-    -- say the objective text in the narrator voice, if it exists. Many quests don't have this field, and it's often redundant with the quest text, so it's better to skip it when empty.
-    if (GetObjectiveText() or "") ~= "" then
-         objective = CleanText("\1" .. GetObjectiveText() .. "\n")
+    local title = GetTitleText() or ""
+    if title ~= "" then
+        table.insert(segments, { text = title .. ". \n", isNarrator = true })
     end
-    
-    local parts = {}
-    if title     and #title     > 0 then table.insert(parts, title) end
-    if questText and #questText > 0 then table.insert(parts, questText) end
-    if objective and #objective > 0 then table.insert(parts, objective) end
 
-    local combined = table.concat(parts, "  ")
-    if #combined == 0 then
+    local questText = GetQuestText() or ""
+    if questText ~= "" then
+        local bodySegments = SplitQuestDetailBodySegments(questText .. "\n")
+        for _, seg in ipairs(bodySegments) do
+            if seg and seg.text and #seg.text > 0 then
+                table.insert(segments, seg)
+            end
+        end
+    end
+
+    local objective = GetObjectiveText() or ""
+    if objective ~= "" then
+        table.insert(segments, { text = objective .. "\n", isNarrator = true })
+    end
+
+    if #segments == 0 then
         RuneReaderVoice:Dbg("QUEST_DETAIL: no text")
         return
     end
 
-    RuneReaderVoice:Dbg("QUEST_DETAIL: " .. #combined .. " chars  gender=" .. GetNPCGender())
+    local totalChars = 0
+    for _, seg in ipairs(segments) do
+        totalChars = totalChars + #(seg.text or "")
+    end
 
-    local did = DispatchDialog(combined)
+    RuneReaderVoice:Dbg("QUEST_DETAIL: " .. totalChars .. " chars  structured segments=" .. #segments .. "  gender=" .. GetNPCGender())
+
+    local did = DispatchStructuredDialog(segments)
     if did then
         _questDetailDialogID = did
         _questDetailOpen = true
         RuneReaderVoice:Dbg("QUEST_DETAIL: opened dialog " .. did)
     end
 end
+
 
 -- ── Quest progress ────────────────────────────────────────────────────────────
 handlers.QUEST_PROGRESS = function()
@@ -544,15 +648,16 @@ handlers.ITEM_TEXT_READY = function()
 
         local parts = {}
         if _bookSource and #_bookSource > 0 then
-            table.insert(parts, "\1" .. _bookSource .. "\n")
+            table.insert(parts, _bookSource)
         end
         for _, pageText in ipairs(_bookPages) do
             table.insert(parts, pageText)
         end
 
         local full = table.concat(parts, "\n\n")
-        RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): dispatching " .. #full .. " chars (" .. #_bookPages .. " pages)")
-        DispatchDialog(full)
+        local bookID = BuildBookIdentityHex(_bookSource or "", _bookPages[1] or full)
+        RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): dispatching " .. #full .. " chars (" .. #_bookPages .. " pages) bookID=" .. bookID)
+        DispatchStructuredDialog({ { text = full, isNarrator = true } }, bookID, 0x00)
 
         -- Suppress any further ITEM_TEXT_READY until user manually turns page
         _bookDispatched = true
@@ -581,12 +686,13 @@ handlers.ITEM_TEXT_READY = function()
     if not text or #text == 0 then return end
     local source = CleanText(ItemTextGetItem())
     local full = (pageNum == 1 and source and #source > 0)
-        and ("\1" .. source .. "\n" .. text)
+        and (source .. "\n" .. text)
         or  text
+    local bookID = BuildBookIdentityHex(source or "", text or full)
     -- User manually navigated — clear dispatched flag so future pages are processed
     _bookDispatched = false
-    RuneReaderVoice:Dbg("ITEM_TEXT_READY (per-page): page " .. pageNum .. " (" .. #full .. " chars)")
-    DispatchDialog(full)
+    RuneReaderVoice:Dbg("ITEM_TEXT_READY (per-page): page " .. pageNum .. " (" .. #full .. " chars) bookID=" .. bookID)
+    DispatchStructuredDialog({ { text = full, isNarrator = true } }, bookID, 0x00)
 end
 
 handlers.ITEM_TEXT_CLOSED = function()

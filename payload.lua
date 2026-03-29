@@ -473,12 +473,12 @@ end
 -- Returns: dialogID (number), array of sessions
 --   Each session: { sessionID=number, qrStrings=array, isNarrator=bool }
 -- isPreview: if true sets FLAG_PREVIEW so reader discards the packet.
-function RuneReaderVoice:BuildDialogSessions(text, isPreview)
+function RuneReaderVoice:BuildDialogSessions(text, isPreview, npcIDOverride, raceByteOverride)
     if not text or #text == 0 then return nil, nil end
 
     local dialogID = NextDialogID()
-    local raceByte = isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte()
-    local npcID    = isPreview and "000000" or RuneReaderVoice:GetNPCID()
+    local raceByte = raceByteOverride or (isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte())
+    local npcID    = npcIDOverride or (isPreview and "000000" or RuneReaderVoice:GetNPCID())
     local segments = RuneReaderVoice:SplitSegments(text)
     local seqTotal = #segments      -- known upfront before any encoding begins
 
@@ -507,6 +507,50 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview)
 --             seg.text:sub(1, 60)
 --         ))
         
+    end
+
+    return dialogID, sessions
+end
+
+
+-- Build all segments for a dialog block from explicit structured segments.
+-- segments: array of { text=string, isNarrator=bool }
+function RuneReaderVoice:BuildDialogSessionsFromSegments(segments, isPreview, npcIDOverride, raceByteOverride)
+    if not segments or #segments == 0 then return nil, nil end
+
+    local filtered = {}
+    for _, seg in ipairs(segments) do
+        local text = seg and seg.text or nil
+        if text and #text > 0 then
+            table.insert(filtered, { text = text, isNarrator = not not seg.isNarrator })
+        end
+    end
+
+    if #filtered == 0 then return nil, nil end
+
+    local dialogID = NextDialogID()
+    local raceByte = raceByteOverride or (isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte())
+    local npcID    = npcIDOverride or (isPreview and "000000" or RuneReaderVoice:GetNPCID())
+    local seqTotal = #filtered
+
+    RuneReaderVoice:QrDbg(string.format("BuildDialogSessionsFromSegments: dialog=%04X segments=%d preview=%s", dialogID, seqTotal, tostring(isPreview)))
+    local sessions = {}
+
+    for seq0, seg in ipairs(filtered) do
+        local seq       = seq0 - 1
+        local flags     = RuneReaderVoice:BuildSpeakerFlags(seg.isNarrator, isPreview)
+        RuneReaderVoice:QrDumpText(string.format("Dialog %04X explicit segment %d text narrator=%s", dialogID, seq, tostring(seg.isNarrator)), seg.text)
+        local qrStrings = BuildSegmentQRStrings(dialogID, seq, seqTotal, flags, raceByte, npcID, seg.text)
+
+        table.insert(sessions, {
+            qrStrings  = qrStrings,
+            isNarrator = seg.isNarrator,
+        })
+
+        RuneReaderVoice:Dbg(string.format(
+            "Explicit segment seq=%d/%d dialog=%04X narrator=%s chunks=%d race=%02X npc=%s",
+            seq, seqTotal, dialogID, tostring(seg.isNarrator), #qrStrings, raceByte, npcID
+        ))
     end
 
     return dialogID, sessions
