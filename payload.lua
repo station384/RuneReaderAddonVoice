@@ -104,6 +104,18 @@ local function GetPadSize()
     return PAD_PRESETS[preset] or 135
 end
 
+-- Header length in protocol v05:
+-- MAGIC(2) + VER(2) + DIALOG(4) + SEQ(2) + SEQTOTAL(2) + SUB(2) + SUBTOTAL(2) + FLAGS(2) + RACE(2) + NPC(6) = 26 chars
+local HEADER_LEN = 26
+
+local function GetPayloadSize()
+    local payloadSize = GetPadSize() - HEADER_LEN
+    if payloadSize < 1 then
+        payloadSize = 1
+    end
+    return payloadSize
+end
+
 -- Speaker / control flag bits
 local FLAG_NARRATOR  = 1    -- bit 0
 local GENDER_MALE    = 2    -- bit 1
@@ -329,102 +341,78 @@ function RuneReaderVoice:SplitSegments(text)
     return segments
 end
 
--- ── Base64 encoding ───────────────────────────────────────────────────────────
+-- -- ── Base64 encoding ───────────────────────────────────────────────────────────
 
-local _b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-local _nativeB64 = (C_EncodingUtil and C_EncodingUtil.EncodeBase64) or nil
-local _band   = bit.band
-local _rshift = bit.rshift
-local _lshift = bit.lshift
-local _bor    = bit.bor
+-- local _b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+-- local _nativeB64 = (C_EncodingUtil and C_EncodingUtil.EncodeBase64) or nil
+-- local _band   = bit.band
+-- local _rshift = bit.rshift
+-- local _lshift = bit.lshift
+-- local _bor    = bit.bor
 
-local function Base64Encode(data)
-    if _nativeB64 then
-        local result = _nativeB64(data)
-        if result then return result end
-    end
-    local band   = _band
-    local rshift = _rshift
-    local lshift = _lshift
-    local bor    = _bor
-    local result = {}
-    local padding = 2 - ((#data - 1) % 3)
-    data = data .. string.rep("\0", padding)
-    for i = 1, #data, 3 do
-        local a, b, c = data:byte(i, i + 2)
-        local idx1 = rshift(a, 2) + 1
-        local idx2 = bor(lshift(band(a, 3), 4), rshift(b, 4)) + 1
-        local idx3 = bor(lshift(band(b, 15), 2), rshift(c, 6)) + 1
-        local idx4 = band(c, 63) + 1
-        result[#result + 1] = _b64chars:sub(idx1, idx1)
-            .. _b64chars:sub(idx2, idx2)
-            .. _b64chars:sub(idx3, idx3)
-            .. _b64chars:sub(idx4, idx4)
-    end
-    local encoded = table.concat(result)
-    if padding == 2 then
-        encoded = encoded:sub(1, -3) .. "=="
-    elseif padding == 1 then
-        encoded = encoded:sub(1, -2) .. "="
-    end
-    return encoded
-end
+-- local function Base64Encode(data)
+--     if _nativeB64 then
+--         local result = _nativeB64(data)
+--         if result then return result end
+--     end
+--     local band   = _band
+--     local rshift = _rshift
+--     local lshift = _lshift
+--     local bor    = _bor
+--     local result = {}
+--     local padding = 2 - ((#data - 1) % 3)
+--     data = data .. string.rep("\0", padding)
+--     for i = 1, #data, 3 do
+--         local a, b, c = data:byte(i, i + 2)
+--         local idx1 = rshift(a, 2) + 1
+--         local idx2 = bor(lshift(band(a, 3), 4), rshift(b, 4)) + 1
+--         local idx3 = bor(lshift(band(b, 15), 2), rshift(c, 6)) + 1
+--         local idx4 = band(c, 63) + 1
+--         result[#result + 1] = _b64chars:sub(idx1, idx1)
+--             .. _b64chars:sub(idx2, idx2)
+--             .. _b64chars:sub(idx3, idx3)
+--             .. _b64chars:sub(idx4, idx4)
+--     end
+--     local encoded = table.concat(result)
+--     if padding == 2 then
+--         encoded = encoded:sub(1, -3) .. "=="
+--     elseif padding == 1 then
+--         encoded = encoded:sub(1, -2) .. "="
+--     end
+--     return encoded
+-- end
 
 -- ── Fixed-size padding ────────────────────────────────────────────────────────
 
-local function PadToFixed(text)
-    local target = GetPadSize()
+local function PadToFixed(text, target)
+    target = target or GetPayloadSize()
     local len = #text
     if len >= target then
-        local truncated = text:sub(1, target)
-        local lastSpace = truncated:match(".*()%s")
-        if lastSpace and lastSpace > 1 then
-            truncated = text:sub(1, lastSpace - 1)
-        end
-        return truncated .. string.rep(" ", target - #truncated)
-    else
-        return text .. string.rep(" ", target - len)
+        return text:sub(1, target)
     end
+    return text .. string.rep(" ", target - len)
 end
 
 
--- ── Word-boundary chunking ────────────────────────────────────────────────────
--- Splits text into chunks that fit within GetPadSize() bytes each.
--- Splits only on word boundaries (never mid-word).
--- Preserves original inter-word spacing so TTS pausing is unaffected.
-local function SplitIntoWordChunks(text)
-    local target = GetPadSize()
+-- ── Byte-stream chunking ─────────────────────────────────────────────────────
+-- Splits text into fixed-size raw byte chunks that fit within the payload portion of a QR block.
+-- No word-boundary logic is used. The source text is treated as a byte stream.
+-- This preserves every byte in order and makes chunk boundaries deterministic.
+local function SplitIntoByteChunks(text)
+    local target = GetPayloadSize()
     local chunks = {}
+    local textLen = #text
     local chunkStart = 1
-    local lastWordEnd = 0
-    local pos = 1
 
-    while pos <= #text do
-        -- Find next word
-        local word_start, word_end = text:find("%S+", pos)
-        if not word_start then break end
-
-        -- Would including this word push the chunk over target?
-        local chunkLen = word_end - chunkStart + 1
-        if chunkLen > target and lastWordEnd >= chunkStart then
-            -- Emit chunk up to end of last word, preserving original spacing
-            table.insert(chunks, text:sub(chunkStart, lastWordEnd))
-            -- Next chunk starts at the beginning of this word
-            chunkStart = word_start
-        end
-
-        lastWordEnd = word_end
-        pos = word_end + 1
-    end
-
-    -- Emit the final chunk
-    if lastWordEnd >= chunkStart then
-        table.insert(chunks, text:sub(chunkStart, lastWordEnd))
-    end
-
-    -- Fallback: if nothing was produced, return whole text as one chunk
-    if #chunks == 0 then
+    if textLen == 0 then
         table.insert(chunks, text)
+        return chunks
+    end
+
+    while chunkStart <= textLen do
+        local chunkEnd = math.min(chunkStart + target - 1, textLen)
+        table.insert(chunks, text:sub(chunkStart, chunkEnd))
+        chunkStart = chunkEnd + 1
     end
 
     return chunks
@@ -435,8 +423,14 @@ end
 -- ── Build QR strings for a single segment ────────────────────────────────────
 
 local function BuildSegmentQRStrings(dialogID, seq, seqTotal, flags, raceByte, npcID, text)
-    local rawChunks   = SplitIntoWordChunks(text)
+    local rawChunks   = SplitIntoByteChunks(text)
     local subTotal    = #rawChunks
+
+    RuneReaderVoice:QrDbg(string.format(
+        "BuildSegmentQRStrings: dialog=%04X seq=%d/%d rawLen=%d chunks=%d payload=%d total=%d flags=%02X race=%02X npc=%s",
+        dialogID, seq, seqTotal, #text, subTotal, GetPayloadSize(), GetPadSize(), flags, raceByte, npcID
+    ))
+    RuneReaderVoice:QrDumpText(string.format("Segment dialog=%04X seq=%d source", dialogID, seq), text)
     if subTotal > 255 then
         RuneReaderVoice:Dbg("WARNING: clamping " .. subTotal .. " chunks to 255")
         subTotal = 255
@@ -444,8 +438,8 @@ local function BuildSegmentQRStrings(dialogID, seq, seqTotal, flags, raceByte, n
 
     local qrStrings = {}
     for i = 1, math.min(#rawChunks, 255) do
-        local padded  = PadToFixed(rawChunks[i])
-        local encoded = Base64Encode(padded)
+        local padded  = PadToFixed(rawChunks[i], GetPayloadSize())
+        --local encoded = Base64Encode(padded)
 
         -- Header: MAGIC(2) + VER(2) + DIALOG(4) + SEQ(2) + SEQTOTAL(2) + SUB(2) + SUBTOTAL(2) + FLAGS(2) + RACE(2) + NPC(6) = 26 chars
         local header = MAGIC
@@ -459,13 +453,15 @@ local function BuildSegmentQRStrings(dialogID, seq, seqTotal, flags, raceByte, n
             .. ToHex2(raceByte)
             .. npcID
 
-        table.insert(qrStrings, header .. encoded)
+        table.insert(qrStrings, header .. padded)
 
         RuneReaderVoice:Dbg(string.format(
             "Chunk seq=%d/%d sub=%d/%d dialog=%04X flags=%02X race=%02X npc=%s raw=%d qr=%d",
             seq, seqTotal, i - 1, subTotal, dialogID, flags, raceByte, npcID,
-            #rawChunks[i], #header + #encoded
+            #rawChunks[i], #header + #padded
         ))
+        RuneReaderVoice:QrDumpText(string.format("Chunk dialog=%04X seq=%d sub=%d raw", dialogID, seq, i - 1), rawChunks[i])
+        RuneReaderVoice:QrDbg(string.format("Chunk dialog=%04X seq=%d sub=%d header=%s", dialogID, seq, i - 1, header))
     end
 
     return qrStrings
@@ -485,11 +481,15 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview)
     local npcID    = isPreview and "000000" or RuneReaderVoice:GetNPCID()
     local segments = RuneReaderVoice:SplitSegments(text)
     local seqTotal = #segments      -- known upfront before any encoding begins
+
+    RuneReaderVoice:QrDbg(string.format("BuildDialogSessions: dialog=%04X rawLen=%d segments=%d preview=%s", dialogID, #text, seqTotal, tostring(isPreview)))
+    RuneReaderVoice:QrDumpText(string.format("Dialog %04X full text", dialogID), text)
     local sessions = {}
 
     for seq0, seg in ipairs(segments) do
         local seq       = seq0 - 1   -- convert to 0-based
         local flags     = RuneReaderVoice:BuildSpeakerFlags(seg.isNarrator, isPreview)
+        RuneReaderVoice:QrDumpText(string.format("Dialog %04X segment %d text narrator=%s", dialogID, seq, tostring(seg.isNarrator)), seg.text)
         local qrStrings = BuildSegmentQRStrings(dialogID, seq, seqTotal, flags, raceByte, npcID, seg.text)
 
         table.insert(sessions, {
@@ -501,11 +501,11 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview)
             "Segment seq=%d/%d dialog=%04X narrator=%s chunks=%d race=%02X npc=%s",
             seq, seqTotal, dialogID, tostring(seg.isNarrator), #qrStrings, raceByte, npcID
         ))
-    print(string.format(
-             "[RRV] Segment seq=%d/%d dialog=%04X narrator=%s chunks=%d race=%02X npc=%s text=|%s|",
-             seq, seqTotal, dialogID, tostring(seg.isNarrator), #qrStrings, raceByte, npcID,
-             seg.text:sub(1, 60)
-         ))
+--    print(string.format(
+--             "[RRV] Segment seq=%d/%d dialog=%04X narrator=%s chunks=%d race=%02X npc=%s text=|%s|",
+--             seq, seqTotal, dialogID, tostring(seg.isNarrator), #qrStrings, raceByte, npcID,
+--             seg.text:sub(1, 60)
+--         ))
         
     end
 
@@ -529,11 +529,11 @@ end
 -- Measurement helper for /rrv measure command.
 function RuneReaderVoice:MeasureText(text)
     if not text or #text == 0 then return 0, 0, 0, 0 end
-    local chunks    = SplitIntoWordChunks(text)
+    local chunks    = SplitIntoByteChunks(text)
     local wordCount = select(2, text:gsub("%S+", ""))
     local totalRaw  = 0
     for _, chunk in ipairs(chunks) do totalRaw = totalRaw + #chunk end
     local avgRaw = #chunks > 0 and math.floor(totalRaw / #chunks) or 0
-    local qrLen  = 22 + #Base64Encode(string.rep(" ", GetPadSize()))
+    local qrLen  = HEADER_LEN + GetPayloadSize()
     return wordCount, #chunks, avgRaw, qrLen
 end

@@ -17,6 +17,7 @@
 ## Category-zhCN: 辅助
 ## Category-zhTW: 輔助
 
+base45.lua
 QRcodeEncoder.lua
 config.lua
 payload.lua

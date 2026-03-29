@@ -57,6 +57,7 @@ RuneReaderVoice.defaultConfig = {
 
     -- Debug
     DEBUG = false,
+    QRDEBUG = false,
 }
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
@@ -73,5 +74,30 @@ end
 function RuneReaderVoice:Dbg(msg)
     if RuneReaderVoiceDB and RuneReaderVoiceDB.DEBUG then
         print("|cff00ccff[RuneReaderVoice]|r " .. tostring(msg))
+    end
+end
+
+function RuneReaderVoice:QrDbg(msg)
+    if RuneReaderVoiceDB and RuneReaderVoiceDB.QRDEBUG then
+        print("|cff33ff99[RRV:QR]|r " .. tostring(msg))
+    end
+end
+
+function RuneReaderVoice:QrDumpText(label, text)
+    if not (RuneReaderVoiceDB and RuneReaderVoiceDB.QRDEBUG) then return end
+    text = tostring(text or "")
+    text = text:gsub("\r", "\\r"):gsub("\n", "\\n")
+    local maxLen = 220
+    local idx = 1
+    local part = 1
+    if #text == 0 then
+        self:QrDbg(label .. ' = ""')
+        return
+    end
+    while idx <= #text do
+        local chunk = text:sub(idx, idx + maxLen - 1)
+        self:QrDbg(string.format("%s [%d] len=%d text=%s", label, part, #chunk, chunk))
+        idx = idx + maxLen
+        part = part + 1
     end
 end

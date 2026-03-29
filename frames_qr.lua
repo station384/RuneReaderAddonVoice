@@ -218,7 +218,7 @@ end
 
 local function EncodeQR(str)
     local ecLevel = (RuneReaderVoiceDB and RuneReaderVoiceDB.Ec_level) or 2
-    local ok, matrix = QRencode.qrcode(str, ecLevel, 4)
+    local ok, matrix = QRencode.qrcode(RuneReaderVoice.base45_encode(str))
     if not ok then
         RuneReaderVoice:Dbg("QR encode failed: " .. tostring(matrix))
         return nil

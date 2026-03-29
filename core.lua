@@ -374,7 +374,7 @@ handlers.QUEST_DETAIL = function()
     local title     = nil
     -- Say the title in the narrator voice
     if (GetTitleText() or "") ~= "" then 
-        title = CleanText("\1" .. GetTitleText() .. "\n")
+        title = CleanText("\1 " .. GetTitleText() .. ". \n")
     end 
 
     -- say quest text in NPC voice
@@ -664,6 +664,10 @@ SlashCmdList["RUNEREADERVOICE"] = function(msg)
         RuneReaderVoiceDB.DEBUG = not RuneReaderVoiceDB.DEBUG
         print("|cff00ccff[RuneReaderVoice]|r Debug: " .. (RuneReaderVoiceDB.DEBUG and "ON" or "OFF"))
 
+    elseif msg == "qrdump" then
+        RuneReaderVoiceDB.QRDEBUG = not RuneReaderVoiceDB.QRDEBUG
+        print("|cff00ccff[RuneReaderVoice]|r QR dump: " .. (RuneReaderVoiceDB.QRDEBUG and "ON" or "OFF"))
+
     elseif msg == "stop" then
         RuneReaderVoice:StopDisplay()
         _activeDialogID = nil
@@ -736,6 +740,7 @@ SlashCmdList["RUNEREADERVOICE"] = function(msg)
         print("  /rrv measure - show chunk/QR size stats")
         print("  /rrv stop    - hide the QR frame")
         print("  /rrv debug   - toggle debug logging")
+        print("  /rrv qrdump  - dump full dialog and every QR chunk to chat")
         print("  /rrv race    - show detected race/creature info (use while dialog open)")
         print("  /rrv gossip  - dump all NPC text sources (use while dialog open)")
     end
