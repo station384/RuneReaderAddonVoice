@@ -62,7 +62,7 @@
 --
 --   QUEST_FINISHED quirks:
 --     Fires on accept AND decline. May fire twice. May fire immediately
---     after QUEST_DETAIL (movie/auto-accept quests). Guarded by dialog ID + 3s minimum.
+--     after QUEST_DETAIL (movie/auto-accept quests). Guarded by dialog ID + 5s minimum.
 
 RuneReaderVoice = RuneReaderVoice or {}
 
@@ -229,6 +229,37 @@ local function BuildBookIdentityHex(title, firstPageText)
     return string.format("%06X", value)
 end
 
+local _pendingCloseTimer = nil
+
+local function CancelPendingClose()
+    if _pendingCloseTimer and _pendingCloseTimer.Cancel then
+        _pendingCloseTimer:Cancel()
+    end
+    _pendingCloseTimer = nil
+end
+
+local function SchedulePendingClose(eventName, delay, onClose)
+    local dialogAtClose = _activeDialogID
+    if not dialogAtClose then return end
+
+    CancelPendingClose()
+    RuneReaderVoice:Dbg(eventName .. " -> deferred stop in " .. delay .. "s for dialog " .. dialogAtClose)
+    _pendingCloseTimer = C_Timer.NewTimer(delay, function()
+        _pendingCloseTimer = nil
+        if _activeDialogID == dialogAtClose then
+            if onClose then
+                onClose()
+            else
+                RuneReaderVoice:StopDisplay()
+                _activeDialogID = nil
+            end
+            RuneReaderVoice:Dbg(eventName .. " -> deferred stop fired")
+        else
+            RuneReaderVoice:Dbg(eventName .. " -> deferred stop cancelled (dialog changed)")
+        end
+    end)
+end
+
 -- DispatchDialog: split text into narrator/NPC segments, build QR sessions,
 -- hand all sessions to StartDisplaySessions for cycling.
 -- Returns: dialogID (for QUEST_FINISHED guard) or nil on empty text.
@@ -255,6 +286,7 @@ local function DispatchDialog(text, npcIDOverride, raceByteOverride)
         "Dialog %04X: %d segment(s)", dialogID, #sessions
     ))
 
+    CancelPendingClose()
     _activeDialogID = dialogID
     RuneReaderVoice:StartDisplaySessions(dialogID, sessions)
     return dialogID
@@ -300,6 +332,7 @@ local function DispatchStructuredDialog(segments, npcIDOverride, raceByteOverrid
         "Dialog %04X: %d structured segment(s)", dialogID, #sessions
     ))
 
+    CancelPendingClose()
     _activeDialogID = dialogID
     RuneReaderVoice:StartDisplaySessions(dialogID, sessions)
     return dialogID
@@ -408,35 +441,22 @@ end
 
 
 
--- Immediate stop — unambiguous frame close, no new dialog expected imminently.
+-- Frame close: keep the QR visible for 5 seconds, unless a new dialog opens first.
 local function StopOnFrameClose(eventName)
-    RuneReaderVoice:Dbg(eventName .. " -> StopDisplay")
-    RuneReaderVoice:StopDisplay()
-    _activeDialogID = nil
-end
-
--- Delayed stop — frame may briefly hide/reshow (e.g. gossip option navigation).
--- Uses same 3s guard pattern as QUEST_FINISHED: only stops if the dialog hasn't
--- changed by the time the timer fires.
-local function StopOnFrameCloseDelayed(eventName, delay)
-    local dialogAtClose = _activeDialogID
-    if not dialogAtClose then return end
-    RuneReaderVoice:Dbg(eventName .. " -> deferred stop in " .. delay .. "s for dialog " .. dialogAtClose)
-    C_Timer.After(delay, function()
-        if _activeDialogID == dialogAtClose then
-            RuneReaderVoice:StopDisplay()
-            _activeDialogID = nil
-            RuneReaderVoice:Dbg(eventName .. " -> deferred stop fired")
-        else
-            RuneReaderVoice:Dbg(eventName .. " -> deferred stop cancelled (dialog changed)")
-        end
+    SchedulePendingClose(eventName, 5.0, function()
+        RuneReaderVoice:StopDisplay()
+        _activeDialogID = nil
     end)
 end
 
--- GOSSIP_CLOSED fires on every gossip option navigation, not just final close.
--- Use a short delay so a new GOSSIP_SHOW (which sets a new _activeDialogID) can
--- arrive and cancel the stop before it fires.
-handlers.GOSSIP_CLOSED         = function() StopOnFrameCloseDelayed("GOSSIP_CLOSED", 0.5) end
+local function StopOnFrameCloseDelayed(eventName, delay)
+    SchedulePendingClose(eventName, delay, function()
+        RuneReaderVoice:StopDisplay()
+        _activeDialogID = nil
+    end)
+end
+
+handlers.GOSSIP_CLOSED         = function() StopOnFrameClose("GOSSIP_CLOSED") end
 handlers.TAXIMAP_CLOSED        = function() StopOnFrameClose("TAXIMAP_CLOSED") end
 handlers.ADVENTURE_MAP_CLOSE   = function() StopOnFrameClose("ADVENTURE_MAP_CLOSE") end
 handlers.MERCHANT_CLOSED       = function() StopOnFrameClose("MERCHANT_CLOSED") end
@@ -535,7 +555,7 @@ end
 -- ── Quest finished ────────────────────────────────────────────────────────────
 -- Fires on accept OR decline. May fire twice. May fire immediately after
 -- QUEST_DETAIL for movie/auto-accept quests.
--- Strategy: 3 second minimum display time, then stop only if dialog unchanged.
+-- Strategy: 5 second minimum display time, then stop only if dialog unchanged.
 handlers.QUEST_FINISHED = function()
     local dialogAtFinish = _activeDialogID
 
@@ -548,15 +568,13 @@ handlers.QUEST_FINISHED = function()
         return
     end
 
-    RuneReaderVoice:Dbg("QUEST_FINISHED: will stop dialog " .. dialogAtFinish .. " in 3s")
+    RuneReaderVoice:Dbg("QUEST_FINISHED: will stop dialog " .. dialogAtFinish .. " in 5s")
 
-    C_Timer.After(3.0, function()
-        if _activeDialogID == dialogAtFinish then
-            RuneReaderVoice:StopDisplay()
-            _activeDialogID      = nil
-            _questDetailDialogID = nil
-            RuneReaderVoice:Dbg("QUEST_FINISHED: stopped display")
-        end
+    SchedulePendingClose("QUEST_FINISHED", 5.0, function()
+        RuneReaderVoice:StopDisplay()
+        _activeDialogID      = nil
+        _questDetailDialogID = nil
+        RuneReaderVoice:Dbg("QUEST_FINISHED: stopped display")
     end)
 end
 
