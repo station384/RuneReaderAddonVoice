@@ -140,29 +140,42 @@ local function ToHex4(n)  return string.format("%04X", n % 0x10000) end
 -- Returns the RACE byte for the current NPC.
 -- Prioritises "target" since the player must target the NPC to open dialog.
 -- "questnpc" and "npc" tokens are tried as well but are often unpopulated.
--- Falls back to creature type if no player raceID is available.
--- Returns 0x00 (unknown) if nothing is detectable.
+-- Falls back to creature type only when it is safe to do so.
+-- Returns 0x00 (unknown) if nothing is safely detectable.
 function RuneReaderVoice:GetNPCRaceByte()
-    -- Try all unit tokens for a player raceID (1-63)
-    local _, _, raceID = UnitRace("target")
-    if not raceID then _, _, raceID = UnitRace("questnpc") end
-    if not raceID then _, _, raceID = UnitRace("npc") end
+    local ok, result = pcall(function()
+        -- Try all unit tokens for a player raceID (1-63)
+        local _, _, raceID = UnitRace("target")
+        if not raceID then _, _, raceID = UnitRace("questnpc") end
+        if not raceID then _, _, raceID = UnitRace("npc") end
 
-    if raceID and raceID >= 1 and raceID <= 0x3F then
-        return raceID
+        if raceID and raceID >= 1 and raceID <= 0x3F then
+            return raceID
+        end
+
+        -- Secret values can make creature type unsafe to use as a table key in combat.
+        -- If we do not have a safe player raceID, fall back to unknown instead of exploding.
+        if InCombatLockdown and InCombatLockdown() then
+            return 0x00
+        end
+
+        local creatureType = UnitCreatureType("target")
+            or UnitCreatureType("questnpc")
+            or UnitCreatureType("npc")
+
+        if creatureType then
+            local mapped = CREATURE_TYPE_RACE[creatureType]
+            if mapped then return mapped end
+        end
+
+        return 0x00  -- unknown - RuneReader will use narrator/neutral fallback
+    end)
+
+    if ok and result then
+        return result
     end
 
-    -- No player raceID - try creature type (target first, same reasoning)
-    local creatureType = UnitCreatureType("target")
-        or UnitCreatureType("questnpc")
-        or UnitCreatureType("npc")
-
-    if creatureType then
-        local mapped = CREATURE_TYPE_RACE[creatureType]
-        if mapped then return mapped end
-    end
-
-    return 0x00  -- unknown - RuneReader will use narrator/neutral fallback
+    return 0x00
 end
 
 -- ── NPC ID detection ──────────────────────────────────────────────────────────
@@ -174,18 +187,30 @@ end
 -- Only valid for Creature GUIDs. Returns "000000" for players, pets, objects,
 -- or if the target is unavailable.
 function RuneReaderVoice:GetNPCID()
-    local guid = UnitGUID("target") or UnitGUID("questnpc") or UnitGUID("npc")
-    if not guid then return "000000" end
+    local ok, result = pcall(function()
+        local guid = UnitGUID("target") or UnitGUID("questnpc") or UnitGUID("npc")
+        if not guid then return "000000" end
 
-    -- Only Creature GUIDs have an NPC ID in segment 6
-    local unitType = guid:match("^(%a+)-")
-    if unitType ~= "Creature" and unitType ~= "Vehicle" then return "000000" end
+        if InCombatLockdown() then
+            return "000000"
+        end
 
-    local npcIDStr = select(6, strsplit("-", guid))
-    local npcID = tonumber(npcIDStr)
-    if not npcID then return "000000" end
+        -- Only Creature GUIDs have an NPC ID in segment 6
+        local unitType = guid:match("^(%a+)-")
+        if unitType ~= "Creature" and unitType ~= "Vehicle" then return "000000" end
 
-    return string.format("%06X", npcID)
+        local npcIDStr = select(6, strsplit("-", guid))
+        local npcID = tonumber(npcIDStr)
+        if not npcID then return "000000" end
+
+        return string.format("%06X", npcID)
+    end)
+
+    if ok and result then
+        return result
+    end
+
+    return "000000"
 end
 
 function RuneReaderVoice:BuildSpeakerFlags(isNarrator, isPreview)

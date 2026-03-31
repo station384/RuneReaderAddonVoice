@@ -450,6 +450,7 @@ local function StopOnFrameClose(eventName)
 end
 
 local function StopOnFrameCloseDelayed(eventName, delay)
+   --print("Scheduled qrcode close")
     SchedulePendingClose(eventName, delay, function()
         RuneReaderVoice:StopDisplay()
         _activeDialogID = nil
@@ -458,13 +459,14 @@ end
 
 handlers.GOSSIP_CLOSED         = function() StopOnFrameClose("GOSSIP_CLOSED") end
 handlers.TAXIMAP_CLOSED        = function() StopOnFrameClose("TAXIMAP_CLOSED") end
-handlers.ADVENTURE_MAP_CLOSE   = function() StopOnFrameClose("ADVENTURE_MAP_CLOSE") end
+handlers.ADVENTURE_MAP_CLOSE   = function() StopOnFrameCloseDelayed("ADVENTURE_MAP_CLOSE",15) end
 handlers.MERCHANT_CLOSED       = function() StopOnFrameClose("MERCHANT_CLOSED") end
 handlers.TRAINER_CLOSED        = function() StopOnFrameClose("TRAINER_CLOSED") end
 handlers.BANKFRAME_CLOSED      = function() StopOnFrameClose("BANKFRAME_CLOSED") end
 handlers.MAIL_CLOSED           = function() StopOnFrameClose("MAIL_CLOSED") end
 handlers.AUCTION_HOUSE_CLOSED  = function() StopOnFrameClose("AUCTION_HOUSE_CLOSED") end
 handlers.LOOT_CLOSED           = function() StopOnFrameClose("LOOT_CLOSED") end
+
 -- QUEST_LOG_UPDATE fires too frequently for reliable close detection and is
 -- covered by the QuestFrame:OnHide hook in HookWindowClose.
 -- ── Quest greeting (multi-quest NPC) ─────────────────────────────────────────
@@ -529,6 +531,12 @@ handlers.QUEST_DETAIL = function()
         _questDetailOpen = true
         RuneReaderVoice:Dbg("QUEST_DETAIL: opened dialog " .. did)
     end
+      SchedulePendingClose("QUEST_FINISHED", 30.0, function()
+        RuneReaderVoice:StopDisplay()
+        _activeDialogID      = nil
+        _questDetailDialogID = nil
+        RuneReaderVoice:Dbg("Automatic Close after 30 sec: stopped display")
+    end)
 end
 
 
