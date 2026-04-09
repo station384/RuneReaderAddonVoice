@@ -344,14 +344,34 @@ local function SplitQuestDetailBodySegments(text)
 
     local pos = 1
     while pos <= #text do
-        local s, e, inner = text:find("<(.-)>", pos)
-        if s then
+        local angleStart  = text:find("<", pos, true)
+        local squareStart = text:find("[", pos, true)
+
+        local s, e
+        if angleStart and squareStart then
+            if angleStart < squareStart then
+                s = angleStart
+                e = text:find(">", s + 1, true)
+            else
+                s = squareStart
+                e = text:find("]", s + 1, true)
+            end
+        elseif angleStart then
+            s = angleStart
+            e = text:find(">", s + 1, true)
+        elseif squareStart then
+            s = squareStart
+            e = text:find("]", s + 1, true)
+        end
+
+        if s and e then
             if s > pos then
                 local npcText = text:sub(pos, s - 1)
                 if #npcText > 0 then
                     table.insert(segments, { text = npcText, isNarrator = false })
                 end
             end
+            local inner = text:sub(s + 1, e - 1)
             if inner and #inner > 0 then
                 table.insert(segments, { text = inner, isNarrator = true })
             end

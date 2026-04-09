@@ -104,6 +104,69 @@ local function GetPadSize()
     return PAD_PRESETS[preset] or 135
 end
 
+local META_START = ""
+local META_END   = ""
+
+local function StripRealm(name)
+    if not name or name == "" then return "" end
+    local dash = name:find("-", 1, true)
+    if dash then
+        return name:sub(1, dash - 1)
+    end
+    return name
+end
+
+local function GetPlayerClassName()
+    local _, classFile = UnitClass("player")
+    if not classFile then return "" end
+
+    local map = {
+        WARRIOR = "Warrior",
+        PALADIN = "Paladin",
+        HUNTER = "Hunter",
+        ROGUE = "Rogue",
+        PRIEST = "Priest",
+        DEATHKNIGHT = "Death Knight",
+        SHAMAN = "Shaman",
+        MAGE = "Mage",
+        WARLOCK = "Warlock",
+        MONK = "Monk",
+        DRUID = "Druid",
+        DEMONHUNTER = "Demon Hunter",
+        EVOKER = "Evoker",
+    }
+
+    return map[classFile] or classFile
+end
+
+local function BuildPlayerMetaPrefix()
+    local fullName = UnitName("player") or ""
+    local player = StripRealm(fullName)
+    local realm = GetRealmName() or ""
+    local className = GetPlayerClassName()
+
+    local parts = {}
+    if player ~= "" then
+        table.insert(parts, META_START .. "RRV:PLAYER=" .. player .. META_END)
+    end
+    if realm ~= "" then
+        table.insert(parts, META_START .. "RRV:REALM=" .. realm .. META_END)
+    end
+    if className ~= "" then
+        table.insert(parts, META_START .. "RRV:CLASS=" .. className .. META_END)
+    end
+
+    if #parts == 0 then return "" end
+    return table.concat(parts, "")
+end
+
+local function PrependDialogMetaToSegments(segments, isPreview)
+    if isPreview or not segments or #segments == 0 then return end
+    local prefix = BuildPlayerMetaPrefix()
+    if prefix == "" then return end
+    segments[1].text = prefix .. (segments[1].text or "")
+end
+
 -- Header length in protocol v05:
 -- MAGIC(2) + VER(2) + DIALOG(4) + SEQ(2) + SEQTOTAL(2) + SUB(2) + SUBTOTAL(2) + FLAGS(2) + RACE(2) + NPC(6) = 26 chars
 local HEADER_LEN = 26
@@ -283,18 +346,29 @@ function RuneReaderVoice:SplitSegments(text)
         if narratorPart and #narratorPart > 0 then
             table.insert(segments, { text = narratorPart, isNarrator = true })
         end
-    end
-
-
-    -- Main quest Body
-    -- Walk through text finding <...> spans
+    end    -- Main quest Body
+    -- Walk through text finding <...> or [...] spans
     local pos = 1
     while pos <= #text do
-        -- Use [^>]* instead of .- so the pattern matches across newlines.
-        -- Lua's . does not match \n by default, so multi-line <...> spans would
-        -- break the parse and cause segments to be dropped.
-        local bracketStart = text:find("<", pos, true)
-        local bracketEnd   = bracketStart and text:find(">", bracketStart + 1, true)
+        local angleStart  = text:find("<", pos, true)
+        local squareStart = text:find("[", pos, true)
+
+        local bracketStart, bracketEnd
+        if angleStart and squareStart then
+            if angleStart < squareStart then
+                bracketStart = angleStart
+                bracketEnd   = text:find(">", bracketStart + 1, true)
+            else
+                bracketStart = squareStart
+                bracketEnd   = text:find("]", bracketStart + 1, true)
+            end
+        elseif angleStart then
+            bracketStart = angleStart
+            bracketEnd   = text:find(">", bracketStart + 1, true)
+        elseif squareStart then
+            bracketStart = squareStart
+            bracketEnd   = text:find("]", bracketStart + 1, true)
+        end
 
         if bracketStart and bracketEnd then
             -- NPC speech before the bracket (if any)
@@ -505,6 +579,7 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview, npcIDOverride, rac
     local raceByte = raceByteOverride or (isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte())
     local npcID    = npcIDOverride or (isPreview and "000000" or RuneReaderVoice:GetNPCID())
     local segments = RuneReaderVoice:SplitSegments(text)
+    PrependDialogMetaToSegments(segments, isPreview)
     local seqTotal = #segments      -- known upfront before any encoding begins
 
     RuneReaderVoice:QrDbg(string.format("BuildDialogSessions: dialog=%04X rawLen=%d segments=%d preview=%s", dialogID, #text, seqTotal, tostring(isPreview)))
@@ -552,6 +627,8 @@ function RuneReaderVoice:BuildDialogSessionsFromSegments(segments, isPreview, np
     end
 
     if #filtered == 0 then return nil, nil end
+
+    PrependDialogMetaToSegments(filtered, isPreview)
 
     local dialogID = NextDialogID()
     local raceByte = raceByteOverride or (isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte())
