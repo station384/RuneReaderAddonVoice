@@ -21,6 +21,7 @@
         "SettingsPanel",
         "GossipFrame",
         "QuestFrame",
-        "ItemTextFrame"
+        "ItemTextFrame",
+        "UIParent"
     ]
 }

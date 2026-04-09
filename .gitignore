@@ -1,3 +1,5 @@
 RuneReaderVoiceAddon.zip
 rrvaddon.*.zip
-./.vscode/*
+.vscode/*
+.idea/*
+
