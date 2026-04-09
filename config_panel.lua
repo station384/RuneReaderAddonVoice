@@ -96,7 +96,7 @@ function RuneReaderVoice:CreateConfigPanel()
     -- ── QR display ────────────────────────────────────────────────────────────
     AddSlider("QRScale",          "QR Frame Scale",
         "Visual scale of the QR frame. Reading is pixel-perfect regardless of scale.",
-        1.0, 0.3, 2.0, 0.05, "%.2fx")
+        1.0, 1.0, 2.0, 0.05, "%.2fx")
 
     AddSlider("QRModuleSize",     "QR Module Size (px)",
         "Pixel size of each QR module.",
