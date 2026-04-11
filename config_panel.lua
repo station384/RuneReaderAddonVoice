@@ -96,15 +96,15 @@ function RuneReaderVoice:CreateConfigPanel()
     -- ── QR display ────────────────────────────────────────────────────────────
     AddSlider("QRScale",          "QR Frame Scale",
         "Visual scale of the QR frame. Reading is pixel-perfect regardless of scale.",
-        1.0, 1.0, 2.0, 0.05, "%.2fx")
+        2.0, 1.0, 2.0, 0.5, "%.2fx")
 
     AddSlider("QRModuleSize",     "QR Module Size (px)",
         "Pixel size of each QR module.",
-        2, 1, 6, 1, "%d px")
+        1, 1, 6, 1, "%d px")
 
     AddSlider("QRQuietZone",      "QR Quiet Zone (modules)",
         "White border around the QR code in modules. Minimum 3 recommended.",
-        3, 1, 6, 1, "%d")
+        1, 1, 6, 1, "%d")
 
     AddSlider("ChunkDisplayTime", "Chunk Display Time",
         "Seconds each chunk is shown. RuneReader reads at ~5ms; 0.10s gives 20x margin.",
@@ -113,11 +113,11 @@ function RuneReaderVoice:CreateConfigPanel()
     -- ── Pad size ──────────────────────────────────────────────────────────────
     AddDropdown("PadPreset", "QR Pad Size",
         "Pads all chunks to a fixed size so QR code never resizes between chunks.",
-        1, { "Small (50 bytes)", "Medium (135 bytes)", "Large (250 bytes)", "Custom" })
+        0, { "Small (50 bytes)", "Medium (135 bytes)", "Large (250 bytes)", "Custom" })
 
     _customSliderInitializer = AddSlider("PadCustomSize", "Custom Pad Size (bytes)",
         "Used when Pad Size is set to Custom. Range 50-500.",
-        135, 50, 500, 5, "%d bytes")
+        50, 50, 500, 5, "%d bytes")
 
     -- Set initial visibility of custom slider
     RuneReaderVoice:UpdateCustomSliderVisibility(RuneReaderVoiceDB.PadPreset or 1)

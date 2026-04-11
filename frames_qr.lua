@@ -61,7 +61,12 @@ function RuneReaderVoice:CreateQRFrame()
     f:SetSize(totalPx, totalPx)
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:SetIgnoreParentScale(true)
-    f:SetScale(db.QRScale or 1.0)
+    
+    -- f:SetScale(db.QRScale or 1.0)
+    local scale = tonumber(db.QRScale) or 1.0
+    if scale < 1 then scale = 1 end
+    f:SetScale(scale)
+
     f:SetBackdrop({ bgFile = "Interface/Tooltips/UI-Tooltip-Background", tile = true })
     f:SetBackdropColor(1, 1, 1, 1)
     f:SetMovable(true)
@@ -127,8 +132,8 @@ end
 -- StartDisplay after the addon loads or after a QRModuleSize/QuietZone change).
 local function RebuildTexturePool(f, qrSize)
     local db         = RuneReaderVoiceDB
-    local moduleSize = db.QRModuleSize or 2
-    local quietZone  = db.QRQuietZone  or 3
+    local moduleSize = math.floor(db.QRModuleSize or 2)
+    local quietZone  = math.floor(db.QRQuietZone  or 3)
 
     -- Release old textures
     if f.textures then
@@ -146,11 +151,25 @@ local function RebuildTexturePool(f, qrSize)
     for y = 1, qrSize do
         for x = 1, qrSize do
             local tex = f:CreateTexture(nil, "ARTWORK")
+
+            local left = math.floor((x - 1 + quietZone) * moduleSize)
+            local top  = -math.floor((y - 1 + quietZone) * moduleSize)
+
+            tex:ClearAllPoints()
+            tex:SetPoint("TOPLEFT", left, top)
             tex:SetSize(moduleSize, moduleSize)
-            tex:SetPoint("TOPLEFT",
-                (x - 1 + quietZone) * moduleSize,
-                -((y - 1 + quietZone) * moduleSize)
-            )
+
+            -- Solid quad, not an image texture, so no texture filtering blur
+            tex:SetColorTexture(1, 1, 1, 0)
+
+            -- Force crisp placement on pixel boundaries when supported
+            if tex.SetSnapToPixelGrid then
+                tex:SetSnapToPixelGrid(true)
+            end
+            if tex.SetTexelSnappingBias then
+                tex:SetTexelSnappingBias(0)
+            end
+
             tex:Show()
             table.insert(f.textures, tex)
         end
@@ -162,6 +181,49 @@ local function RebuildTexturePool(f, qrSize)
         qrSize, qrSize * qrSize, totalPx
     ))
 end
+-- local function RebuildTexturePool(f, qrSize)
+--     local db         = RuneReaderVoiceDB
+--     local moduleSize = db.QRModuleSize or 2
+--     local quietZone  = db.QRQuietZone  or 3
+
+--     -- Release old textures
+--     if f.textures then
+--         for _, tex in ipairs(f.textures) do
+--             tex:Hide()
+--             tex:SetParent(nil)
+--         end
+--         wipe(f.textures)
+--     end
+--     f.textures = {}
+
+--     local totalPx = (qrSize + 2 * quietZone) * moduleSize
+--     f:SetSize(totalPx, totalPx)
+
+--     for y = 1, qrSize do
+--         for x = 1, qrSize do
+--             local tex = f:CreateTexture(nil, "ARTWORK")
+--             tex:SetSize(moduleSize, moduleSize)
+--             tex:SetPoint("TOPLEFT",
+--                 (x - 1 + quietZone) * moduleSize,
+--                 -((y - 1 + quietZone) * moduleSize)
+--             )
+--             if tex.SetSnapToPixelGrid then
+--                 tex:SetSnapToPixelGrid(true)
+--             end
+--             if tex.SetTexelSnappingBias then
+--                 tex:SetTexelSnappingBias(1)
+--             end
+--             tex:Show()
+--             table.insert(f.textures, tex)
+--         end
+--     end
+
+--     f.qrSize = qrSize
+--     RuneReaderVoice:Dbg(string.format(
+--         "RebuildTexturePool: qrSize=%d modules=%d totalPx=%d",
+--         qrSize, qrSize * qrSize, totalPx
+--     ))
+-- end
 
 -- ── Texture update (diff-based) ───────────────────────────────────────────────
 -- Only calls SetColorTexture on modules whose value changed from the last frame.

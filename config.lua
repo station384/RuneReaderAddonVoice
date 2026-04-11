@@ -25,8 +25,8 @@ RuneReaderVoiceDB = RuneReaderVoiceDB or {}
 RuneReaderVoice.defaultConfig = {
     -- QR display
     QRModuleSize    = 1,        -- pixel size of each QR module
-    QRQuietZone     = 3,        -- quiet zone border in modules
-    QRScale         = 1.0,      -- UI scale of the QR frame
+    QRQuietZone     = 1,        -- quiet zone border in modules
+    QRScale         = 2.0,      -- UI scale of the QR frame
     Ec_level        = 2,        -- QR error correction: 1=L 2=M 3=Q 4=H
 
     -- TTS chunking / timing
@@ -40,8 +40,8 @@ RuneReaderVoice.defaultConfig = {
     -- All chunks in a session are padded to max(actualChunkSize, targetPadSize)
     -- so the QR matrix version never changes mid-session.
     -- PadPreset index: 0=Small(50) 1=Medium(135) 2=Large(250) 3=Custom(PadCustomSize)
-    PadPreset     = 1,          -- 0=Small(50) 1=Medium(135) 2=Large(250) 3=Custom
-    PadCustomSize = 135,        -- used when PadMode == "custom", range 50-500
+    PadPreset     = 0,          -- 0=Small(50) 1=Medium(135) 2=Large(250) 3=Custom
+    PadCustomSize = 50,        -- used when PadMode == "custom", range 50-500
 
     -- Speaker classification
     UseVoiceChatGender = true,  -- try C_VoiceChat for NPC gender before falling back to UnitSex
@@ -52,7 +52,7 @@ RuneReaderVoice.defaultConfig = {
     EnableQuestDetail   = true, -- voice quest description (QUEST_DETAIL)
     EnableQuestProgress = true, -- voice quest progress text
     EnableQuestReward   = true, -- voice quest reward text
-    EnableBooks         = false, -- voice in-game books (ITEM_TEXT) - Phase 2
+    EnableBooks         = true, -- voice in-game books (ITEM_TEXT) - Phase 2
     BookScanMode        = true,  -- scan all pages on open before dispatch; false = one page at a time
 
     -- Debug
