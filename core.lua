@@ -187,22 +187,36 @@ local function apply_phonics(text)
 end
 local function CleanText(text)
     if not text then return nil end
-    -- Strip WoW colour codes  |cffRRGGBB ... |r
-    text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-    -- Replace common zone names with hyphenated versions to improve TTS chunking.
-    -- this functionality is moved to the client side for better performance and to preserve original text in the QR payload.
-    -- the addon should not make any assumptions about the text content or structure, as this can vary widely across quests and NPCs. The TTS engine is better equipped to handle phonetic adjustments without risking unintended consequences in the displayed text.
-    --text = apply_phonics(text)  
 
+    -- WoW text control-code stripping for outbound QR payloads.
+    -- Easy disable/remove: keep all filtering inside this one function.
+    local PIPE_SENTINEL = ""
+    text = text:gsub("||", PIPE_SENTINEL)
 
-    -- Collapse whitespace / newlines
-    --text = text:gsub("%s+", " ")
+    -- Keep visible hyperlink text, drop wrapper metadata.
+    -- Example: |Hquest:123|h[Quest Name]|h -> [Quest Name]
+    text = text:gsub("|H.-|h(.-)|h", "%1")
 
-    -- text = text:gsub("[ \t\f\v]+", " ")
-    -- text = text:gsub("%.%.%.","..")
-    -- text = text:gsub("% %-% "," -- ")
-    local m = text   --text:match("^%s*(.-)%s*$") 
+    -- Strip common WoW inline control tags.
+    text = text:gsub("|c%x%x%x%x%x%x%x%x", "")  -- color start
+    text = text:gsub("|r", "")                  -- color end
+    text = text:gsub("|T.-|t", " ")             -- texture tag
+    text = text:gsub("|A.-|a", " ")             -- atlas tag
+    text = text:gsub("|n", "\n")               -- explicit newline
+    text = text:gsub("|N", "\n")
+    text = text:gsub("|F.-|f", "")              -- font wrapper
+    text = text:gsub("|K.-|k", "")              -- Battle.net/declension tokens
 
+    -- Defensive cleanup for malformed or leaked control fragments.
+    text = text:gsub("|%d+", "")                -- leaked numeric token like |5
+    text = text:gsub("|[HhTtAaKkFfRrCcNn]", "")  -- orphaned control introducers
+
+    text = text:gsub(PIPE_SENTINEL, "|")
+
+    -- Optional phonics stays off here. Addon should only strip transport/control markup.
+    --text = apply_phonics(text)
+
+    local m = text
     return m
 end
 
