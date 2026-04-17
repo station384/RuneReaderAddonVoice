@@ -224,7 +224,6 @@ end
 local function NormalizeBookKeyPart(s)
     s = CleanText(s or "") or ""
     s = s:upper()
-    s = s:gsub("%s+", " ")
     return s
 end
 
