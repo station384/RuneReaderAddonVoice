@@ -139,11 +139,43 @@ local function GetPlayerClassName()
     return map[classFile] or classFile
 end
 
+local function GetCurrentPlayerTitleText()
+    if type(GetCurrentTitle) ~= "function" or type(GetTitleName) ~= "function" then
+        return ""
+    end
+
+    local titleId = GetCurrentTitle()
+    if not titleId or titleId <= 0 then
+        return ""
+    end
+
+    local ok, titleText = pcall(GetTitleName, titleId)
+    if not ok or not titleText then
+        return ""
+    end
+
+    titleText = tostring(titleText or "")
+    if titleText == "" then
+        return ""
+    end
+
+    -- WoW title API returns the raw title fragment. Prefix titles conventionally end
+    -- with a trailing space (example: "Chef "), while suffix titles do not
+    -- (example: "Destroyer's End"). Convert that fragment into a full template so
+    -- the client can reconstruct the in-game visible form with the player name.
+    if titleText:match("%s$") then
+        return titleText .. "%s"
+    end
+
+    return "%s, " .. titleText
+end
+
 local function BuildPlayerMetaPrefix()
     local fullName = UnitName("player") or ""
     local player = StripRealm(fullName)
     local realm = GetRealmName() or ""
     local className = GetPlayerClassName()
+    local playerTitle = GetCurrentPlayerTitleText()
 
     local parts = {}
     if player ~= "" then
@@ -154,6 +186,9 @@ local function BuildPlayerMetaPrefix()
     end
     if className ~= "" then
         table.insert(parts, META_START .. "RRV:CLASS=" .. className .. META_END)
+    end
+    if playerTitle ~= "" then
+        table.insert(parts, META_START .. "RRV:TITLE=" .. playerTitle .. META_END)
     end
 
     if #parts == 0 then return "" end
@@ -329,10 +364,10 @@ function RuneReaderVoice:SplitSegments(text)
 
     if questStart and questStart <= firstLineEnd then
         -- Title text: everything on the first line before the \1 sentinel
-        local titlePart    = text:sub(1, questStart - 1):match("^%s*(.-)%s*$")
+        local titlePart    = text:sub(1, questStart - 1)
 
         -- Narrator text: everything on the first line after the \1, up to (not including) the \n
-        local narratorPart = text:sub(questStart + 1, firstLineEnd):match("^%s*(.-)%s*$")
+        local narratorPart = text:sub(questStart + 1, firstLineEnd)
 
         -- Body: everything after the first line's newline (skip the \n itself)
         text = text:sub(firstLineEnd + 1)
@@ -373,14 +408,14 @@ function RuneReaderVoice:SplitSegments(text)
         if bracketStart and bracketEnd then
             -- NPC speech before the bracket (if any)
             if bracketStart > pos then
-                local before = text:sub(pos, bracketStart - 1):match("^%s*(.-)%s*$")
+                local before = text:sub(pos, bracketStart - 1)
                 if before and #before > 0 then
                     table.insert(segments, { text = before, isNarrator = false })
                 end
             end
 
             -- Narrator segment: content inside brackets (brackets stripped)
-            local narrator = text:sub(bracketStart + 1, bracketEnd - 1):match("^%s*(.-)%s*$")
+            local narrator = text:sub(bracketStart + 1, bracketEnd - 1)
             if narrator and #narrator > 0 then
                 table.insert(segments, { text = narrator, isNarrator = true })
             end
@@ -388,7 +423,7 @@ function RuneReaderVoice:SplitSegments(text)
             pos = bracketEnd + 1
         else
             -- No more brackets - remainder is NPC speech
-            local remainder = text:sub(pos):match("^%s*(.-)%s*$")
+            local remainder = text:sub(pos)
             if remainder and #remainder > 0 then
                 table.insert(segments, { text = remainder, isNarrator = false })
             end
@@ -405,18 +440,18 @@ function RuneReaderVoice:SplitSegments(text)
         local lastSeg    = segments[#segments]
         local questStart = lastSeg.text:find("\1", 1, true)
         if questStart then
-            local npcPart = lastSeg.text:sub(1, questStart - 1):match("^%s*(.-)%s*$")
+            local npcPart = lastSeg.text:sub(1, questStart - 1)
 
             -- Narrator part: skip the \1 byte, then trim.
             -- Two options — pick whichever sounds better.
             -- Leaving Option B in the code for now so I can flip to either and see how each one "feels" in-game.
             -- Option A (no announcement): narrator reads only the objective text.
             --   e.g. "Collect 5 apples and return to Thrall."
-            local narratorPart = lastSeg.text:sub(questStart + 1):match("^%s*(.-)%s*$")
+            local narratorPart = lastSeg.text:sub(questStart + 1)
             --
             -- Option B (with announcement): narrator announces then reads.
             --   e.g. "Quest Objectives. Collect 5 apples and return to Thrall."
-            -- local narratorPart = ("Quest Objectives. " .. lastSeg.text:sub(questStart + 1)):match("^%s*(.-)%s*$")
+            -- local narratorPart = ("Quest Objectives. " .. lastSeg.text:sub(questStart + 1))
 
             -- Update or remove the last segment
             if npcPart and #npcPart > 0 then
