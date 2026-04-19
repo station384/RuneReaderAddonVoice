@@ -284,32 +284,75 @@ end
 --   seg:  1   2   3    4     5      6           7
 -- Only valid for Creature GUIDs. Returns "000000" for players, pets, objects,
 -- or if the target is unavailable.
-function RuneReaderVoice:GetNPCID()
-    local ok, result = pcall(function()
-        local guid = UnitGUID("target") or UnitGUID("questnpc") or UnitGUID("npc")
-        if not guid then return "000000" end
+-- function RuneReaderVoice:GetNPCID()
+--     local ok, result = pcall(function()
+--         local guid = UnitGUID("target") or UnitGUID("questnpc") or UnitGUID("npc")
+--         if not guid then return "000000" end
 
-        if InCombatLockdown() then
+--         if InCombatLockdown() then
+--             return "000000"
+--         end
+
+--         -- Only Creature GUIDs have an NPC ID in segment 6
+--         local unitType = guid:match("^(%a+)-")
+--         if unitType ~= "Creature" and unitType ~= "Vehicle" then return "000000" end
+
+--         local npcIDStr = select(6, strsplit("-", guid))
+--         local npcID = tonumber(npcIDStr)
+--         if not npcID then return "000000" end
+
+--         return string.format("%06X", npcID)
+--     end)
+
+--     if ok and result then
+--         return result
+--     end
+
+--     return "000000"
+-- end
+
+function RuneReaderVoice:GetNPCID()
+        local ok, result = pcall(function()
+        
+            --print("GUID",UnitGUID("target"))
+        
+            local guid = UnitGUID("target") or UnitGUID("questnpc") or UnitGUID("npc")
+            if issecretvalue(guid) then  
+              --      print("GUID is Secret") 
+                    return "000000" 
+                end
+                
+            if not guid then return "000000" end
+
+            local unitType = guid:match("^(%a+)-")
+            --print ("UnitType:", unitType)
+            if unitType ~= "Creature" and unitType ~= "Vehicle" then
+              --  print("returning 000000")
+                return "000000"
+            end
+
+        local npcIDStr = select(6, strsplit("-", guid))
+        --print("npcIDStr:", npcIDStr)
+        local npcID = tonumber(npcIDStr or "", 10)
+        --print("npcID:", npcID)
+
+        if not npcID or npcID < 0 or npcID > 0xFFFFFF then
+         --   print ("not npcID or npcID < 0 or npcID > 0xFFFFFF:", "evaled true")
             return "000000"
         end
 
-        -- Only Creature GUIDs have an NPC ID in segment 6
-        local unitType = guid:match("^(%a+)-")
-        if unitType ~= "Creature" and unitType ~= "Vehicle" then return "000000" end
-
-        local npcIDStr = select(6, strsplit("-", guid))
-        local npcID = tonumber(npcIDStr)
-        if not npcID then return "000000" end
-
         return string.format("%06X", npcID)
     end)
-
+    --print("value of ok:", ok)
+    --print("value of result:", result)
     if ok and result then
         return result
     end
 
     return "000000"
 end
+
+
 
 function RuneReaderVoice:BuildSpeakerFlags(isNarrator, isPreview)
     if isNarrator then
