@@ -1,4 +1,4 @@
-## Interface: 120001
+## Interface: 120005
 ## Title: RuneReaderVoice
 ## Notes: Quest dialog TTS - encodes quest text as QR codes for RuneReader voice synthesis
 ## Version: 0.1.0
