@@ -20,13 +20,13 @@
 
 RuneReaderVoice = RuneReaderVoice or {}
 
-local CODE39_FONT = [[Interface\AddOns\RuneReaderVoice\Fonts\LibreBarcode39-Regular.ttf]]
+local CODE39_FONT = [[Interface\AddOns\RuneReaderVoice\Fonts\LibreBarcode39-Regular-modified.otf]]
 
 -- Runtime Code39 payload may contain a WoW secret value. Never measure it.
 -- For layout, measure this fixed non-secret dummy string with GUID-like shape.
-local CODE39_GUID_WIDTH_DUMMY = "*RRVG-Creature-0-0000-0-00-000000-0000000000*"
-local MAX_CODE39_FONT_SIZE = 32
-local CODE39_HORIZONTAL_PADDING = 8
+local CODE39_GUID_WIDTH_DUMMY = "*RRVG-Creature-0-00002-0-00-0000002-0000000000343246545*"
+local MAX_CODE39_FONT_SIZE = 56
+local CODE39_HORIZONTAL_PADDING = 2
 local _guidPayload = nil
 
 local function Code39Enabled()
@@ -34,7 +34,7 @@ local function Code39Enabled()
 end
 
 local function GetFontSize()
-    local n = tonumber(RuneReaderVoiceDB and RuneReaderVoiceDB.Code39FontSize) or 10
+    local n = 20 or tonumber(RuneReaderVoiceDB and RuneReaderVoiceDB.Code39FontSize) or 10
     if n < 10 then n = 10 end
     if n > MAX_CODE39_FONT_SIZE then n = MAX_CODE39_FONT_SIZE end
     return n
@@ -48,6 +48,7 @@ local function EnsureCode39Frame()
     f:SetIgnoreParentScale(true)
     f:SetBackdrop({ bgFile = "Interface/Buttons/WHITE8X8", tile = true })
     f:SetBackdropColor(0.3, 0.2, 0, 1)
+    f:SetScale(1)
     f:SetMovable(true)
     f:EnableMouse(true)
     f:SetClampedToScreen(true)
@@ -57,6 +58,7 @@ local function EnsureCode39Frame()
     bar:SetJustifyH("CENTER")
     bar:SetJustifyV("MIDDLE")
     bar:SetTextColor(0, 0, 0, 1)
+    bar:SetTextHeight(5)
     bar:SetShadowOffset(0, 0)
     bar:SetShadowColor(0, 0, 0, 0)
     f.bar = bar
@@ -162,7 +164,7 @@ function RuneReaderVoice:ShowCode39Guid(guidPayload)
     -- Secret-safe: measure fixed dummy text only, never the real GUID payload.
     local barWidth = MeasureDummyGuidWidth(f, fontSize)
     local frameWidth = barWidth + (CODE39_HORIZONTAL_PADDING * 2)
-    local frameHeight = (fontSize / 8) 
+    local frameHeight = (fontSize / 4) 
 
     f:SetSize(frameWidth, frameHeight)
 
