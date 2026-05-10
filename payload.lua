@@ -316,7 +316,7 @@ function RuneReaderVoice:GetNPCID()
         
             --print("GUID",UnitGUID("target"))
         
-            local guid = UnitGUID("target") or UnitGUID("questnpc") or UnitGUID("npc")
+            local guid = UnitGUID("target") or UnitGUID("npc") or  UnitGUID("questnpc") 
             if issecretvalue(guid) then  
               --      print("GUID is Secret") 
                     return "000000" 
