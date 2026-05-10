@@ -170,12 +170,25 @@ local function GetCurrentPlayerTitleText()
     return "%s, " .. titleText
 end
 
-local function BuildPlayerMetaPrefix()
+local function GetCurrentNpcNameForMeta()
+    local ok, result = pcall(function()
+        local name = UnitName("npc") or UnitName("target") or UnitName("questnpc")
+        if issecretvalue and issecretvalue(name) then
+            return ""
+        end
+        return name
+    end)
+    if ok and result then return result end
+    return ""
+end
+
+local function BuildDialogMetaPrefix()
     local fullName = UnitName("player") or ""
     local player = StripRealm(fullName)
     local realm = GetRealmName() or ""
     local className = GetPlayerClassName()
     local playerTitle = GetCurrentPlayerTitleText()
+    local npcName = GetCurrentNpcNameForMeta()
 
     local parts = {}
     if player ~= "" then
@@ -190,6 +203,9 @@ local function BuildPlayerMetaPrefix()
     if playerTitle ~= "" then
         table.insert(parts, META_START .. "RRV:TITLE=" .. playerTitle .. META_END)
     end
+    if npcName ~= "" then
+        table.insert(parts, META_START .. "RRV:NPCNAME=" .. npcName .. META_END)
+    end
 
     if #parts == 0 then return "" end
     return table.concat(parts, "")
@@ -197,7 +213,7 @@ end
 
 local function PrependDialogMetaToSegments(segments, isPreview)
     if isPreview or not segments or #segments == 0 then return end
-    local prefix = BuildPlayerMetaPrefix()
+    local prefix = BuildDialogMetaPrefix()
     if prefix == "" then return end
     segments[1].text = prefix .. (segments[1].text or "")
 end
@@ -316,7 +332,7 @@ function RuneReaderVoice:GetNPCID()
         
             --print("GUID",UnitGUID("target"))
         
-            local guid = UnitGUID("target") or UnitGUID("npc") or  UnitGUID("questnpc") 
+            local guid = UnitGUID("npc") or UnitGUID("target") or UnitGUID("questnpc") 
             if issecretvalue(guid) then  
               --      print("GUID is Secret") 
                     return "000000" 
@@ -656,6 +672,7 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview, npcIDOverride, rac
     local dialogID = NextDialogID()
     local raceByte = raceByteOverride or (isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte())
     local npcID    = npcIDOverride or (isPreview and "000000" or RuneReaderVoice:GetNPCID())
+    local code39GuidPayload = RuneReaderVoice.BuildCode39SideChannel and RuneReaderVoice:BuildCode39SideChannel(isPreview) or nil
     local segments = RuneReaderVoice:SplitSegments(text)
     PrependDialogMetaToSegments(segments, isPreview)
     local seqTotal = #segments      -- known upfront before any encoding begins
@@ -687,7 +704,7 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview, npcIDOverride, rac
         
     end
 
-    return dialogID, sessions
+    return dialogID, sessions, code39GuidPayload
 end
 
 
@@ -711,6 +728,7 @@ function RuneReaderVoice:BuildDialogSessionsFromSegments(segments, isPreview, np
     local dialogID = NextDialogID()
     local raceByte = raceByteOverride or (isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte())
     local npcID    = npcIDOverride or (isPreview and "000000" or RuneReaderVoice:GetNPCID())
+    local code39GuidPayload = RuneReaderVoice.BuildCode39SideChannel and RuneReaderVoice:BuildCode39SideChannel(isPreview) or nil
     local seqTotal = #filtered
 
     RuneReaderVoice:QrDbg(string.format("BuildDialogSessionsFromSegments: dialog=%04X segments=%d preview=%s", dialogID, seqTotal, tostring(isPreview)))
@@ -733,7 +751,7 @@ function RuneReaderVoice:BuildDialogSessionsFromSegments(segments, isPreview, np
         ))
     end
 
-    return dialogID, sessions
+    return dialogID, sessions, code39GuidPayload
 end
 
 -- -- Legacy single-session builder kept for preview (single-segment text only).

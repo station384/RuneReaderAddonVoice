@@ -33,6 +33,11 @@ RuneReaderVoice.defaultConfig = {
     ChunkDisplayTime = 0.10,    -- seconds each chunk is displayed (100ms default)
                                 -- RuneReader reads at ~5ms; 100ms gives ample margin
 
+    -- Experimental Code39 identity side-channel
+    Code39Enabled    = true,       -- display independent Code39 GUID side-channel
+    Code39FontSize   = 10,         -- barcode font size; larger = easier scan, wider bars
+    Code39Position   = nil,        -- saved independent Code39 frame anchor
+
     -- QR payload padding (keeps QR code the same size across all chunks)
     -- PadMode: "preset" uses a named size; "custom" uses PadCustomSize.
     -- PadPreset: "small"=50, "medium"=135, "large"=250

@@ -289,7 +289,7 @@ local function DispatchDialog(text, npcIDOverride, raceByteOverride)
         ))
     end
 
-    local dialogID, sessions = RuneReaderVoice:BuildDialogSessions(text, false, npcIDOverride, raceByteOverride)
+    local dialogID, sessions, code39GuidPayload = RuneReaderVoice:BuildDialogSessions(text, false, npcIDOverride, raceByteOverride)
     if not sessions or #sessions == 0 then
         RuneReaderVoice:Dbg("BuildDialogSessions returned empty")
         return nil
@@ -301,7 +301,7 @@ local function DispatchDialog(text, npcIDOverride, raceByteOverride)
 
     CancelPendingClose()
     _activeDialogID = dialogID
-    RuneReaderVoice:StartDisplaySessions(dialogID, sessions)
+    RuneReaderVoice:StartDisplaySessions(dialogID, sessions, code39GuidPayload)
     return dialogID
 end
 
@@ -335,7 +335,7 @@ local function DispatchStructuredDialog(segments, npcIDOverride, raceByteOverrid
         ))
     end
 
-    local dialogID, sessions = RuneReaderVoice:BuildDialogSessionsFromSegments(cleaned, false, npcIDOverride, raceByteOverride)
+    local dialogID, sessions, code39GuidPayload = RuneReaderVoice:BuildDialogSessionsFromSegments(cleaned, false, npcIDOverride, raceByteOverride)
     if not sessions or #sessions == 0 then
         RuneReaderVoice:Dbg("BuildDialogSessionsFromSegments returned empty")
         return nil
@@ -347,7 +347,7 @@ local function DispatchStructuredDialog(segments, npcIDOverride, raceByteOverrid
 
     CancelPendingClose()
     _activeDialogID = dialogID
-    RuneReaderVoice:StartDisplaySessions(dialogID, sessions)
+    RuneReaderVoice:StartDisplaySessions(dialogID, sessions, code39GuidPayload)
     return dialogID
 end
 
@@ -861,6 +861,50 @@ SlashCmdList["RUNEREADERVOICE"] = function(msg)
             20 + math.ceil(250 * 4 / 3)
         ))
 
+    elseif msg == "code39" then
+        RuneReaderVoiceDB.Code39Enabled = not RuneReaderVoiceDB.Code39Enabled
+        print("|cff00ccff[RuneReaderVoice]|r Code39 side-channel: " .. (RuneReaderVoiceDB.Code39Enabled and "ON" or "OFF"))
+        if not RuneReaderVoiceDB.Code39Enabled and RuneReaderVoice.HideCode39Frame then
+            RuneReaderVoice:HideCode39Frame()
+        elseif RuneReaderVoice.RefreshCode39Frame then
+            RuneReaderVoice:RefreshCode39Frame()
+        end
+
+    elseif msg == "code39test" then
+        if RuneReaderVoice.ShowCode39Test then
+            RuneReaderVoice:ShowCode39Test()
+        end
+
+    elseif msg == "code39size" then
+        local sizes = { 10, 12, 14, 16, 18, 20, 24, 28, 32 }
+        local cur = tonumber(RuneReaderVoiceDB.Code39FontSize or 12) or 12
+        local nextSize = sizes[1]
+        for i = 1, #sizes do
+            if cur < sizes[i] then
+                nextSize = sizes[i]
+                break
+            end
+        end
+        if cur >= sizes[#sizes] then nextSize = sizes[1] end
+        RuneReaderVoiceDB.Code39FontSize = nextSize
+        print("|cff00ccff[RuneReaderVoice]|r Code39 font size: " .. nextSize)
+        if RuneReaderVoice.RefreshCode39Frame then
+            RuneReaderVoice:RefreshCode39Frame()
+        end
+
+    elseif msg == "code39bare" then
+        RuneReaderVoiceDB.Code39FontSize = 10
+        print("|cff00ccff[RuneReaderVoice]|r Code39 bare mode: font size 10.")
+        if RuneReaderVoice.RefreshCode39Frame then
+            RuneReaderVoice:RefreshCode39Frame()
+        end
+
+    elseif msg == "code39reset" then
+        if RuneReaderVoice.ResetCode39Position then
+            RuneReaderVoice:ResetCode39Position()
+            print("|cff00ccff[RuneReaderVoice]|r Code39 position reset.")
+        end
+
     elseif msg == "race" then
         local _, _, raceID_t  = UnitRace("target")
         local _, _, raceID_qn = UnitRace("questnpc")
@@ -906,6 +950,11 @@ SlashCmdList["RUNEREADERVOICE"] = function(msg)
         print("  /rrv stop    - hide the QR frame")
         print("  /rrv debug   - toggle debug logging")
         print("  /rrv qrdump  - dump full dialog and every QR chunk to chat")
+        print("  /rrv code39  - toggle experimental Code39 side-channel")
+        print("  /rrv code39test - show GUID Code39 test bar")
+        print("  /rrv code39size - cycle Code39 font size")
+        print("  /rrv code39bare - reset Code39 font size to compact default")
+        print("  /rrv code39reset - reset independent Code39 frame position")
         print("  /rrv race    - show detected race/creature info (use while dialog open)")
         print("  /rrv gossip  - dump all NPC text sources (use while dialog open)")
     end

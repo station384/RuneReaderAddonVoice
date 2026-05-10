@@ -114,6 +114,9 @@ function RuneReaderVoice:DestroyQRFrame()
         f:SetParent(nil)
         RuneReaderVoice.QRFrame = nil
     end
+    if RuneReaderVoice.HideCode39Frame then
+        RuneReaderVoice:HideCode39Frame()
+    end
     _displayActive   = false
     _matrices        = {}
     _numChunks       = 0
@@ -434,7 +437,7 @@ end
 -- Called by core.lua DispatchDialog. Stores the full dialog block and kicks off
 -- the first segment. Unlike the older one-shot queue, this state is stable so
 -- the full dialog can wrap back to SEQ 0 after the last SEQ completes.
-function RuneReaderVoice:StartDisplaySessions(dialogID, sessions)
+function RuneReaderVoice:StartDisplaySessions(dialogID, sessions, code39GuidPayload)
     if not sessions or #sessions == 0 then return end
 
     -- Cancel any previous queue
@@ -461,6 +464,10 @@ function RuneReaderVoice:StartDisplaySessions(dialogID, sessions)
     RuneReaderVoice:Dbg(string.format(
         "StartDisplaySessions: dialog=%04X segments=%d", dialogID, #_segmentQueue
     ))
+
+    if RuneReaderVoice.ShowCode39Guid then
+        RuneReaderVoice:ShowCode39Guid(code39GuidPayload)
+    end
 
     StartCurrentSegment()
 end
@@ -585,6 +592,9 @@ function RuneReaderVoice:StopDisplay()
     if f then
         f:SetScript("OnUpdate", nil)
         f:Hide()
+    end
+    if RuneReaderVoice.HideCode39Frame then
+        RuneReaderVoice:HideCode39Frame()
     end
     RuneReaderVoice:Dbg("StopDisplay")
 end

@@ -22,5 +22,6 @@ QRcodeEncoder.lua
 config.lua
 payload.lua
 frames_qr.lua
+frames_code39.lua
 config_panel.lua
 core.lua

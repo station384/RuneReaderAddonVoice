@@ -202,10 +202,10 @@ end
 
 function RuneReaderVoice:StartPreview()
     -- isPreview=true sets FLAG_PREVIEW (bit 3) in header so reader ignores it
-    local dialogID, sessions = RuneReaderVoice:BuildDialogSessions(PREVIEW_TEXT, true)
+    local dialogID, sessions, code39GuidPayload = RuneReaderVoice:BuildDialogSessions(PREVIEW_TEXT, true)
     if not sessions or #sessions == 0 then return end
     RuneReaderVoice._previewActive = true
-    RuneReaderVoice:StartDisplaySessions(dialogID, sessions)
+    RuneReaderVoice:StartDisplaySessions(dialogID, sessions, code39GuidPayload)
     RuneReaderVoice:Dbg("Preview started")
 end
 
