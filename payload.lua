@@ -672,7 +672,10 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview, npcIDOverride, rac
     local dialogID = NextDialogID()
     local raceByte = raceByteOverride or (isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte())
     local npcID    = npcIDOverride or (isPreview and "000000" or RuneReaderVoice:GetNPCID())
-    local code39GuidPayload = RuneReaderVoice.BuildCode39SideChannel and RuneReaderVoice:BuildCode39SideChannel(isPreview) or nil
+    local code39GuidPayload, code39NamePayload = nil, nil
+    if RuneReaderVoice.BuildCode39SideChannel then
+        code39GuidPayload, code39NamePayload = RuneReaderVoice:BuildCode39SideChannel(isPreview)
+    end
     local segments = RuneReaderVoice:SplitSegments(text)
     PrependDialogMetaToSegments(segments, isPreview)
     local seqTotal = #segments      -- known upfront before any encoding begins
@@ -704,7 +707,7 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview, npcIDOverride, rac
         
     end
 
-    return dialogID, sessions, code39GuidPayload
+    return dialogID, sessions, code39GuidPayload, code39NamePayload
 end
 
 
@@ -728,7 +731,10 @@ function RuneReaderVoice:BuildDialogSessionsFromSegments(segments, isPreview, np
     local dialogID = NextDialogID()
     local raceByte = raceByteOverride or (isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte())
     local npcID    = npcIDOverride or (isPreview and "000000" or RuneReaderVoice:GetNPCID())
-    local code39GuidPayload = RuneReaderVoice.BuildCode39SideChannel and RuneReaderVoice:BuildCode39SideChannel(isPreview) or nil
+    local code39GuidPayload, code39NamePayload = nil, nil
+    if RuneReaderVoice.BuildCode39SideChannel then
+        code39GuidPayload, code39NamePayload = RuneReaderVoice:BuildCode39SideChannel(isPreview)
+    end
     local seqTotal = #filtered
 
     RuneReaderVoice:QrDbg(string.format("BuildDialogSessionsFromSegments: dialog=%04X segments=%d preview=%s", dialogID, seqTotal, tostring(isPreview)))
@@ -751,7 +757,7 @@ function RuneReaderVoice:BuildDialogSessionsFromSegments(segments, isPreview, np
         ))
     end
 
-    return dialogID, sessions, code39GuidPayload
+    return dialogID, sessions, code39GuidPayload, code39NamePayload
 end
 
 -- -- Legacy single-session builder kept for preview (single-segment text only).

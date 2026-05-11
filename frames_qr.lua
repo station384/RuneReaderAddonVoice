@@ -437,7 +437,7 @@ end
 -- Called by core.lua DispatchDialog. Stores the full dialog block and kicks off
 -- the first segment. Unlike the older one-shot queue, this state is stable so
 -- the full dialog can wrap back to SEQ 0 after the last SEQ completes.
-function RuneReaderVoice:StartDisplaySessions(dialogID, sessions, code39GuidPayload)
+function RuneReaderVoice:StartDisplaySessions(dialogID, sessions, code39GuidPayload, code39NamePayload)
     if not sessions or #sessions == 0 then return end
 
     -- Cancel any previous queue
@@ -465,7 +465,9 @@ function RuneReaderVoice:StartDisplaySessions(dialogID, sessions, code39GuidPayl
         "StartDisplaySessions: dialog=%04X segments=%d", dialogID, #_segmentQueue
     ))
 
-    if RuneReaderVoice.ShowCode39Guid then
+    if RuneReaderVoice.ShowCode39Identity then
+        RuneReaderVoice:ShowCode39Identity(code39GuidPayload, code39NamePayload)
+    elseif RuneReaderVoice.ShowCode39Guid then
         RuneReaderVoice:ShowCode39Guid(code39GuidPayload)
     end
 
