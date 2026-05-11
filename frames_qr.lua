@@ -114,10 +114,9 @@ function RuneReaderVoice:DestroyQRFrame()
         f:SetParent(nil)
         RuneReaderVoice.QRFrame = nil
     end
-    if RuneReaderVoice.HideCode39Frame then
-        RuneReaderVoice:HideCode39Frame()
+    if RuneReaderVoice.HideRrvbFrame then
+        RuneReaderVoice:HideRrvbFrame()
     end
-    _displayActive   = false
     _matrices        = {}
     _numChunks       = 0
     _chunkIndex      = 1
@@ -465,10 +464,8 @@ function RuneReaderVoice:StartDisplaySessions(dialogID, sessions, code39GuidPayl
         "StartDisplaySessions: dialog=%04X segments=%d", dialogID, #_segmentQueue
     ))
 
-    if RuneReaderVoice.ShowCode39Identity then
-        RuneReaderVoice:ShowCode39Identity(code39GuidPayload, code39NamePayload)
-    elseif RuneReaderVoice.ShowCode39Guid then
-        RuneReaderVoice:ShowCode39Guid(code39GuidPayload)
+    if RuneReaderVoice.ShowRrvbIdentity then
+        RuneReaderVoice:ShowRrvbIdentity(code39GuidPayload, code39NamePayload)
     end
 
     StartCurrentSegment()
@@ -595,8 +592,8 @@ function RuneReaderVoice:StopDisplay()
         f:SetScript("OnUpdate", nil)
         f:Hide()
     end
-    if RuneReaderVoice.HideCode39Frame then
-        RuneReaderVoice:HideCode39Frame()
+    if RuneReaderVoice.HideRrvbFrame then
+        RuneReaderVoice:HideRrvbFrame()
     end
     RuneReaderVoice:Dbg("StopDisplay")
 end

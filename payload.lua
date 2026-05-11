@@ -673,8 +673,8 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview, npcIDOverride, rac
     local raceByte = raceByteOverride or (isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte())
     local npcID    = npcIDOverride or (isPreview and "000000" or RuneReaderVoice:GetNPCID())
     local code39GuidPayload, code39NamePayload = nil, nil
-    if RuneReaderVoice.BuildCode39SideChannel then
-        code39GuidPayload, code39NamePayload = RuneReaderVoice:BuildCode39SideChannel(isPreview)
+    if RuneReaderVoice.BuildRrvbSideChannel then
+        code39GuidPayload, code39NamePayload = RuneReaderVoice:BuildRrvbSideChannel(isPreview)
     end
     local segments = RuneReaderVoice:SplitSegments(text)
     PrependDialogMetaToSegments(segments, isPreview)
@@ -732,8 +732,8 @@ function RuneReaderVoice:BuildDialogSessionsFromSegments(segments, isPreview, np
     local raceByte = raceByteOverride or (isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte())
     local npcID    = npcIDOverride or (isPreview and "000000" or RuneReaderVoice:GetNPCID())
     local code39GuidPayload, code39NamePayload = nil, nil
-    if RuneReaderVoice.BuildCode39SideChannel then
-        code39GuidPayload, code39NamePayload = RuneReaderVoice:BuildCode39SideChannel(isPreview)
+    if RuneReaderVoice.BuildRrvbSideChannel then
+        code39GuidPayload, code39NamePayload = RuneReaderVoice:BuildRrvbSideChannel(isPreview)
     end
     local seqTotal = #filtered
 

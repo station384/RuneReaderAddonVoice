@@ -861,23 +861,23 @@ SlashCmdList["RUNEREADERVOICE"] = function(msg)
             20 + math.ceil(250 * 4 / 3)
         ))
 
-    elseif msg == "code39" then
-        RuneReaderVoiceDB.Code39Enabled = not RuneReaderVoiceDB.Code39Enabled
-        print("|cff00ccff[RuneReaderVoice]|r Code39 side-channel: " .. (RuneReaderVoiceDB.Code39Enabled and "ON" or "OFF"))
-        if not RuneReaderVoiceDB.Code39Enabled and RuneReaderVoice.HideCode39Frame then
-            RuneReaderVoice:HideCode39Frame()
-        elseif RuneReaderVoice.RefreshCode39Frame then
-            RuneReaderVoice:RefreshCode39Frame()
+    elseif msg == "rrvb" then
+        RuneReaderVoiceDB.RrvbEnabled = not RuneReaderVoiceDB.RrvbEnabled
+        print("|cff00ccff[RuneReaderVoice]|r RRVB side-channel: " .. (RuneReaderVoiceDB.RrvbEnabled and "ON" or "OFF"))
+        if not RuneReaderVoiceDB.RrvbEnabled and RuneReaderVoice.HideRrvbFrame then
+            RuneReaderVoice:HideRrvbFrame()
+        elseif RuneReaderVoice.RefreshRrvbFrame then
+            RuneReaderVoice:RefreshRrvbFrame()
         end
 
-    elseif msg == "code39test" then
-        if RuneReaderVoice.ShowCode39Test then
-            RuneReaderVoice:ShowCode39Test()
+    elseif msg == "rrvbtest" then
+        if RuneReaderVoice.ShowRrvbTest then
+            RuneReaderVoice:ShowRrvbTest()
         end
 
-    elseif msg == "code39size" then
-        local sizes = { 10, 12, 14, 16, 18, 20, 24, 28, 32 }
-        local cur = tonumber(RuneReaderVoiceDB.Code39FontSize or 12) or 12
+    elseif msg == "rrvbsize" then
+        local sizes = { 14, 16, 20, 24, 30, 40 }
+        local cur = tonumber(RuneReaderVoiceDB.RrvbFontSize or 20) or 20
         local nextSize = sizes[1]
         for i = 1, #sizes do
             if cur < sizes[i] then
@@ -886,23 +886,16 @@ SlashCmdList["RUNEREADERVOICE"] = function(msg)
             end
         end
         if cur >= sizes[#sizes] then nextSize = sizes[1] end
-        RuneReaderVoiceDB.Code39FontSize = nextSize
-        print("|cff00ccff[RuneReaderVoice]|r Code39 font size: " .. nextSize)
-        if RuneReaderVoice.RefreshCode39Frame then
-            RuneReaderVoice:RefreshCode39Frame()
+        RuneReaderVoiceDB.RrvbFontSize = nextSize
+        print("|cff00ccff[RuneReaderVoice]|r RRVB font size: " .. nextSize)
+        if RuneReaderVoice.RefreshRrvbFrame then
+            RuneReaderVoice:RefreshRrvbFrame()
         end
 
-    elseif msg == "code39bare" then
-        RuneReaderVoiceDB.Code39FontSize = 10
-        print("|cff00ccff[RuneReaderVoice]|r Code39 bare mode: font size 10.")
-        if RuneReaderVoice.RefreshCode39Frame then
-            RuneReaderVoice:RefreshCode39Frame()
-        end
-
-    elseif msg == "code39reset" then
-        if RuneReaderVoice.ResetCode39Position then
-            RuneReaderVoice:ResetCode39Position()
-            print("|cff00ccff[RuneReaderVoice]|r Code39 position reset.")
+    elseif msg == "rrvbreset" then
+        if RuneReaderVoice.ResetRrvbPosition then
+            RuneReaderVoice:ResetRrvbPosition()
+            print("|cff00ccff[RuneReaderVoice]|r RRVB position reset.")
         end
 
     elseif msg == "race" then
@@ -950,11 +943,10 @@ SlashCmdList["RUNEREADERVOICE"] = function(msg)
         print("  /rrv stop    - hide the QR frame")
         print("  /rrv debug   - toggle debug logging")
         print("  /rrv qrdump  - dump full dialog and every QR chunk to chat")
-        print("  /rrv code39  - toggle experimental Code39 side-channel")
-        print("  /rrv code39test - show GUID + name Code39 test bars")
-        print("  /rrv code39size - cycle Code39 font size")
-        print("  /rrv code39bare - reset Code39 font size to compact default")
-        print("  /rrv code39reset - reset independent Code39 frame positions")
+        print("  /rrv rrvb       - toggle RuneReader Barcode side-channel")
+        print("  /rrv rrvbtest   - show GUID + name barcode test frames")
+        print("  /rrv rrvbsize   - cycle barcode font size")
+        print("  /rrv rrvbreset  - reset barcode frame positions")
         print("  /rrv race    - show detected race/creature info (use while dialog open)")
         print("  /rrv gossip  - dump all NPC text sources (use while dialog open)")
     end
