@@ -29,14 +29,16 @@ local RRVB_START_STOP   = "\194\167"   -- § U+00A7, byte 0xA7 — start/stop ma
 -- Dummy strings for frame width measurement only.
 -- Must never be the real secret payload. Width is measured on these fixed
 -- strings so Lua never calls GetStringWidth on a secret value.
-local RRVB_GUID_WIDTH_DUMMY = "\194\167RRVG-Creature-0-00002-0-00-0000002-0000000000343246545\194\167"
-local RRVB_NAME_WIDTH_DUMMY = "\194\167RRVN-HIGH ABCDEFGHIJKLMNOPQRSTUVWXYZ\194\167"
+local RRVB_COMBINED_WIDTH_DUMMY = "\194\167RRVX-G=Creature-0-00002-0-00-0000002-0000000000343246545;N=HIGH ABCDEFGHIJKLMNOPQRSTUVWXYZ\194\167"
 
-local MAX_RRVB_FONT_SIZE        = 56
-local RRVB_HORIZONTAL_PADDING   = 2
+local RRVB_FONT_SIZE   = 12     -- barcode font size
+local RRVB_WRAP_WIDTH  = 100   -- GUID frame wrap width in pixels (0 = no wrap)
+local RRVB_WRAP_ROWS = 4
+local RRVB_HORIZONTAL_PADDING = 2
+local RRVB_INSET = 5            -- quiet zone padding around barcode content
+local RRVB_LINE_SPACING = 2     -- line spacing adjustment when wrapped (pixels between lines)
 
-local _guidPayload = nil
-local _namePayload = nil
+local _combinedPayload = nil
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -45,10 +47,7 @@ local function RrvbEnabled()
 end
 
 local function GetFontSize()
-    local n = 12 or tonumber(RuneReaderVoiceDB and RuneReaderVoiceDB.RrvbFontSize) or 20
-    if n < 10 then n = 10 end
-    if n > MAX_RRVB_FONT_SIZE then n = MAX_RRVB_FONT_SIZE end
-    return n
+    return RRVB_FONT_SIZE
 end
 
 local function SetRrvbFont(fontString, fontSize)
@@ -107,13 +106,14 @@ local function CreateOneRrvbFrame(frameName, positionKey, defaultX, defaultY, du
     f._rrvPositionInitialized  = false
 
     local bar = f:CreateFontString(nil, "ARTWORK")
-    bar:SetJustifyH("CENTER")
+    bar:SetJustifyH("LEFT")
     bar:SetJustifyV("TOP")
     bar:SetTextColor(0, 0, 0, 1)
     bar:SetShadowOffset(0, 0)
     bar:SetShadowColor(0, 0, 0, 0)
     if bar.SetWordWrap    then bar:SetWordWrap(false)    end
     if bar.SetNonSpaceWrap then bar:SetNonSpaceWrap(false) end
+    if bar.SetSpacing     then bar:SetSpacing(0)         end
     f.bar = bar
 
     -- Invisible measure string — measures fixed dummy text only, never secrets.
@@ -138,26 +138,15 @@ end
 
 -- ── Lazy frame accessors ──────────────────────────────────────────────────────
 
-local function EnsureGuidFrame()
+local function EnsureCombinedFrame()
     if RuneReaderVoice.RrvbGuidFrame then return RuneReaderVoice.RrvbGuidFrame end
     RuneReaderVoice.RrvbGuidFrame = CreateOneRrvbFrame(
-        "RuneReaderVoiceRrvbGuidFrame",
+        "RuneReaderVoiceRrvbCombinedFrame",
         "RrvbGuidPosition",
         0, -120,
-        RRVB_GUID_WIDTH_DUMMY
+        RRVB_COMBINED_WIDTH_DUMMY
     )
     return RuneReaderVoice.RrvbGuidFrame
-end
-
-local function EnsureNameFrame()
-    if RuneReaderVoice.RrvbNameFrame then return RuneReaderVoice.RrvbNameFrame end
-    RuneReaderVoice.RrvbNameFrame = CreateOneRrvbFrame(
-        "RuneReaderVoiceRrvbNameFrame",
-        "RrvbNamePosition",
-        0, -155,
-        RRVB_NAME_WIDTH_DUMMY
-    )
-    return RuneReaderVoice.RrvbNameFrame
 end
 
 -- ── Layout ────────────────────────────────────────────────────────────────────
@@ -172,21 +161,41 @@ local function MeasureDummyWidth(f, fontSize)
     return math.floor(width + 4)
 end
 
-local function LayoutOneFrame(f, payload, fontSize)
+local function LayoutOneFrame(f, payload, fontSize, wrapWidth)
     ApplyFramePosition(f)
     SetRrvbFont(f.bar, fontSize)
+  
+    if wrapWidth and wrapWidth > 0 then
+        -- Wrap mode: constrain to fixed pixel width, allow multi-line height.
+        local frameWidth  = wrapWidth + (RRVB_INSET * 2)
+        local frameHeight = (fontSize + 4) * RRVB_WRAP_ROWS + (RRVB_INSET * 2)
 
-    -- Measure fixed dummy text only — never the real payload.
-    local barWidth   = MeasureDummyWidth(f, fontSize)
-    local frameWidth = barWidth + (RRVB_HORIZONTAL_PADDING * 2)
-    local frameHeight = fontSize+6
+        f:SetSize(frameWidth, frameHeight)
 
-    f:SetSize(frameWidth, frameHeight)
+        f.bar:ClearAllPoints()
+        f.bar:SetWidth(wrapWidth)
+        f.bar:SetHeight(frameHeight - (RRVB_INSET * 2))
+        f.bar:SetPoint("TOPLEFT", f, "TOPLEFT", RRVB_INSET, -RRVB_INSET)
 
-    f.bar:ClearAllPoints()
-    f.bar:SetWidth(barWidth)
-    f.bar:SetHeight(fontSize-1)
-    f.bar:SetPoint("CENTER", f, "CENTER", 0, 0)
+        if f.bar.SetWordWrap    then f.bar:SetWordWrap(true)    end
+        if f.bar.SetNonSpaceWrap then f.bar:SetNonSpaceWrap(true) end
+        if f.bar.SetSpacing     then f.bar:SetSpacing(RRVB_LINE_SPACING) end
+    else
+        -- Normal single-line mode.
+        local barWidth    = MeasureDummyWidth(f, fontSize)
+        local frameWidth  = barWidth + (RRVB_INSET * 2)
+        local frameHeight = fontSize + (RRVB_INSET * 2)
+
+        f:SetSize(frameWidth, frameHeight)
+
+        f.bar:ClearAllPoints()
+        f.bar:SetWidth(barWidth)
+        f.bar:SetHeight(fontSize)
+        f.bar:SetPoint("TOPLEFT", f, "TOPLEFT", RRVB_INSET, -RRVB_INSET)
+
+        if f.bar.SetWordWrap    then f.bar:SetWordWrap(false)    end
+        if f.bar.SetNonSpaceWrap then f.bar:SetNonSpaceWrap(false) end
+    end
 
     -- Secret-safe: payload already has start/stop markers applied before this call.
     -- Do not inspect or measure after SetText.
@@ -197,8 +206,7 @@ end
 -- ── Public API ────────────────────────────────────────────────────────────────
 
 function RuneReaderVoice:CreateRrvbFrame()
-    EnsureGuidFrame()
-    EnsureNameFrame()
+    EnsureCombinedFrame()
 end
 
 function RuneReaderVoice:DestroyRrvbFrame()
@@ -216,13 +224,11 @@ function RuneReaderVoice:DestroyRrvbFrame()
         RuneReaderVoice.RrvbNameFrame = nil
     end
 
-    _guidPayload = nil
-    _namePayload = nil
+    _combinedPayload = nil
 end
 
 function RuneReaderVoice:HideRrvbFrame()
-    _guidPayload = nil
-    _namePayload = nil
+    _combinedPayload = nil
 
     local guidFrame = RuneReaderVoice.RrvbGuidFrame
     if guidFrame then guidFrame:Hide() end
@@ -231,30 +237,29 @@ function RuneReaderVoice:HideRrvbFrame()
     if nameFrame then nameFrame:Hide() end
 end
 
-function RuneReaderVoice:ShowRrvbIdentity(guidPayload, namePayload)
-    _guidPayload = guidPayload
-    _namePayload = namePayload
+function RuneReaderVoice:ShowRrvbIdentity(combinedPayload, legacyNamePayload)
+    -- legacyNamePayload intentionally ignored. RRVB now uses one combined block:
+    --   §RRVX-G=<guid>;N=<name>§
+    _combinedPayload = combinedPayload
 
-    if not RrvbEnabled() or not guidPayload then
+    if not RrvbEnabled() or not combinedPayload then
         RuneReaderVoice:HideRrvbFrame()
         return
     end
 
     local fontSize = GetFontSize()
+    local wrapWidth = RRVB_WRAP_WIDTH
 
-    LayoutOneFrame(EnsureGuidFrame(), guidPayload, fontSize)
+    LayoutOneFrame(EnsureCombinedFrame(), combinedPayload, fontSize, wrapWidth > 0 and wrapWidth or nil)
 
-    if namePayload then
-        LayoutOneFrame(EnsureNameFrame(), namePayload, fontSize)
-    else
-        local nameFrame = RuneReaderVoice.RrvbNameFrame
-        if nameFrame then nameFrame:Hide() end
-    end
+    -- Old two-frame path is disabled, but hide stale name frame if it exists from an older session/version.
+    local nameFrame = RuneReaderVoice.RrvbNameFrame
+    if nameFrame then nameFrame:Hide() end
 end
 
 function RuneReaderVoice:RefreshRrvbFrame()
-    if _guidPayload then
-        RuneReaderVoice:ShowRrvbIdentity(_guidPayload, _namePayload)
+    if _combinedPayload then
+        RuneReaderVoice:ShowRrvbIdentity(_combinedPayload, nil)
     end
 end
 
@@ -262,18 +267,17 @@ function RuneReaderVoice:ResetRrvbPosition()
     RuneReaderVoiceDB.RrvbGuidPosition = nil
     RuneReaderVoiceDB.RrvbNamePosition = nil
 
-    local guidFrame = EnsureGuidFrame()
+    local guidFrame = EnsureCombinedFrame()
     guidFrame:ClearAllPoints()
     guidFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, -120)
     guidFrame._rrvPositionInitialized = true
 
-    local nameFrame = EnsureNameFrame()
-    nameFrame:ClearAllPoints()
-    nameFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, -155)
-    nameFrame._rrvPositionInitialized = true
+    RuneReaderVoiceDB.RrvbNamePosition = nil
+    local nameFrame = RuneReaderVoice.RrvbNameFrame
+    if nameFrame then nameFrame:Hide() end
 
-    if _guidPayload then
-        RuneReaderVoice:ShowRrvbIdentity(_guidPayload, _namePayload)
+    if _combinedPayload then
+        RuneReaderVoice:ShowRrvbIdentity(_combinedPayload, nil)
     end
 end
 
@@ -304,22 +308,25 @@ function RuneReaderVoice:BuildRrvbSideChannel(isPreview)
     local name = RuneReaderVoice:GetCurrentNpcNameForRrvb()
 
     -- Secret-safe: only fixed literal concat on secret values.
-    -- No inspection, normalization, measurement, or transformation.
-    local guidPayload = RRVB_START_STOP .. "RRVG-" .. guid .. RRVB_START_STOP
-    local namePayload = nil
+    -- No inspection, normalization, measurement, escaping, or transformation.
+    -- Combined payload format:
+    --   RRVX-G=<guid>;N=<name>
+    -- If name is unavailable, emit an empty N= field.
+    local combinedPayload = nil
     if name then
-        namePayload = RRVB_START_STOP .. "RRVN-" .. name .. RRVB_START_STOP
+        combinedPayload = RRVB_START_STOP .. "RRVX-G=" .. guid .. ";N=" .. name .. RRVB_START_STOP
+    else
+        combinedPayload = RRVB_START_STOP .. "RRVX-G=" .. guid .. ";N=" .. RRVB_START_STOP
     end
 
-    return guidPayload, namePayload
+    return combinedPayload, nil
 end
 
 -- ── Test helper ───────────────────────────────────────────────────────────────
 
 function RuneReaderVoice:ShowRrvbTest()
     RuneReaderVoiceDB.RrvbEnabled = true
-    local guidPayload = RRVB_START_STOP .. "RRVG-Creature-0-3779-0-90-235481-00007B5082" .. RRVB_START_STOP
-    local namePayload = RRVB_START_STOP .. "RRVN-Lor Themar Theron" .. RRVB_START_STOP
-    RuneReaderVoice:ShowRrvbIdentity(guidPayload, namePayload)
-    print(string.format("|cff00ccff[RuneReaderVoice]|r RRVB identity test shown. fontSize=%d", GetFontSize()))
+    local combinedPayload = RRVB_START_STOP .. "RRVX-G=Creature-0-3779-0-90-235481-00007B5082;N=Lor Themar Theron" .. RRVB_START_STOP
+    RuneReaderVoice:ShowRrvbIdentity(combinedPayload, nil)
+    print(string.format("|cff00ccff[RuneReaderVoice]|r RRVB combined identity test shown. fontSize=%d", GetFontSize()))
 end
