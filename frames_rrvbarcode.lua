@@ -285,7 +285,7 @@ end
 
 function RuneReaderVoice:GetCurrentNpcGuidForRrvb()
     local ok, result = pcall(function()
-        return UnitGUID("npc") or UnitGUID("target") or UnitGUID("questnpc")
+        return  UnitGUID("target") or UnitGUID("npc") or UnitGUID("questnpc")
     end)
     if ok and result then return result end
     return nil
@@ -293,7 +293,7 @@ end
 
 function RuneReaderVoice:GetCurrentNpcNameForRrvb()
     local ok, result = pcall(function()
-        return UnitName("npc") or UnitName("target") or UnitName("questnpc")
+        return UnitName("target") or UnitName("npc") or  UnitName("questnpc")
     end)
     if ok and result then return result end
     return nil
