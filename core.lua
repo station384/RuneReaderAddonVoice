@@ -526,7 +526,11 @@ handlers.QUEST_DETAIL = function()
 
     local segments = {}
 
-    local title = GetTitleText() or ""
+    local title = ""
+    if GetTitleText() then
+      title = "Quest: " .. GetTitleText()
+    end
+    
     if title ~= "" then
         table.insert(segments, { text = title .. ". \n", isNarrator = true })
     end
