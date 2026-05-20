@@ -259,9 +259,7 @@ local function ToHex4(n)  return string.format("%04X", n % 0x10000) end
 function RuneReaderVoice:GetNPCRaceByte()
     local ok, result = pcall(function()
         -- Try all unit tokens for a player raceID (1-63)
-        local _, _, raceID = UnitRace("target")
-        if not raceID then _, _, raceID = UnitRace("questnpc") end
-        if not raceID then _, _, raceID = UnitRace("npc") end
+        local raceID = RuneReaderVoice.Compat:GetRaceID()
 
         if raceID and raceID >= 1 and raceID <= 0x3F then
             return raceID
@@ -273,9 +271,7 @@ function RuneReaderVoice:GetNPCRaceByte()
             return 0x00
         end
 
-        local creatureType = UnitCreatureType("target")
-            or UnitCreatureType("questnpc")
-            or UnitCreatureType("npc")
+        local creatureType = RuneReaderVoice.Compat:GetCreatureType()
 
         if creatureType then
             local mapped = CREATURE_TYPE_RACE[creatureType]
@@ -332,7 +328,7 @@ function RuneReaderVoice:GetNPCID()
         
             --print("GUID",UnitGUID("target"))
         
-            local guid = UnitGUID("npc") or UnitGUID("target") or UnitGUID("questnpc") 
+            local guid = RuneReaderVoice.Compat:GetUnitGUID() 
             if issecretvalue(guid) then  
               --      print("GUID is Secret") 
                     return "000000" 
@@ -379,7 +375,7 @@ function RuneReaderVoice:BuildSpeakerFlags(isNarrator, isPreview)
 
     local flags = 0
     -- UnitSex: 1=unknown, 2=male, 3=female
-    local sex = UnitSex("target") or UnitSex("questnpc") or UnitSex("npc") or 1
+    local sex = RuneReaderVoice.Compat:GetUnitSex() or 1
     if sex == 2 then
         flags = flags + GENDER_MALE
     elseif sex == 3 then

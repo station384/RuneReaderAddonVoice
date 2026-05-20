@@ -23,6 +23,7 @@
         "QuestFrame",
         "ItemTextFrame",
         "UIParent",
-        "Wrap"
+        "Wrap",
+        "ItemTextPageText"
     ]
 }
