@@ -27,8 +27,35 @@ local _customSliderInitializer = nil
 
 -- ── Panel creation ────────────────────────────────────────────────────────────
 
+local function CreateClassicFallbackPanel()
+    if not InterfaceOptions_AddCategory or not CreateFrame then
+        return
+    end
+
+    local panel = CreateFrame("Frame", "RuneReaderVoiceOptionsPanel", UIParent)
+    panel.name = "RuneReaderVoice"
+
+    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("RuneReaderVoice")
+
+    local body = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    body:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -12)
+    body:SetWidth(560)
+    body:SetJustifyH("LEFT")
+    body:SetText("Classic compatibility mode loaded. Full Retail Settings panel is unavailable on this client. Use /rrv commands and SavedVariables defaults for now.")
+
+    InterfaceOptions_AddCategory(panel)
+end
+
 function RuneReaderVoice:CreateConfigPanel()
     RuneReaderVoiceDB = RuneReaderVoiceDB or {}
+
+    if not Settings or not Settings.RegisterVerticalLayoutCategory then
+        CreateClassicFallbackPanel()
+        return
+    end
+
     local category = Settings.RegisterVerticalLayoutCategory("RuneReaderVoice")
 
     -- Single OnChanged handler for every setting.

@@ -94,7 +94,7 @@ local EVENTS = {
 }
 
 for _, ev in ipairs(EVENTS) do
-    eventFrame:RegisterEvent(ev)
+    RuneReaderVoice.Compat:RegisterEvent(eventFrame, ev)
 end
 
 -- ── Internal state ────────────────────────────────────────────────────────────
@@ -411,35 +411,17 @@ end
 -- ── NPC info helpers ──────────────────────────────────────────────────────────
 
 local function GetNPCGender()
-    local sex = UnitSex("questnpc") or UnitSex("npc") or UnitSex("target") or 1
-    if sex == 2 then return "male"
-    elseif sex == 3 then return "female"
-    else return "unknown" end
+    return RuneReaderVoice.Compat:GetNPCGender()
 end
 
 -- ── Gossip / NPC body text ────────────────────────────────────────────────────
 
 local function GetGossipBodyText()
-    if C_GossipInfo and C_GossipInfo.GetText then
-        local t = CleanText(C_GossipInfo.GetText() .. "\n")
-        if t and #t > 0 then
-            RuneReaderVoice:Dbg("Gossip text from C_GossipInfo.GetText: " .. #t .. " chars")
-            return t
-        end
-    end
-    if GetGossipText then
-        local t = CleanText(GetGossipText() .. "\n")
-        if t and #t > 0 then
-            RuneReaderVoice:Dbg("Gossip text from GetGossipText: " .. #t .. " chars")
-            return t
-        end
-    end
-    if GossipGreetingText then
-        local t = CleanText(GossipGreetingText:GetText() .. "\n")
-        if t and #t > 0 then
-            RuneReaderVoice:Dbg("Gossip text from GossipGreetingText FontString: " .. #t .. " chars")
-            return t
-        end
+    local raw, source = RuneReaderVoice.Compat:GetGossipText()
+    local t = CleanText((raw or "") .. "\n")
+    if t and #t > 0 then
+        RuneReaderVoice:Dbg("Gossip text from " .. tostring(source) .. ": " .. #t .. " chars")
+        return t
     end
     RuneReaderVoice:Dbg("GetGossipBodyText: no text found from any source")
     return nil
@@ -513,7 +495,7 @@ handlers.LOOT_CLOSED           = function() StopOnFrameClose("LOOT_CLOSED") end
 handlers.QUEST_GREETING = function()
     local db = RuneReaderVoiceDB
     if not db or not db.EnableQuestGreeting then return end
-    local text = CleanText(GetGreetingText() .. "\n")
+    local text = CleanText((RuneReaderVoice.Compat:GetGreetingText() or "") .. "\n")
     if not text or #text == 0 then return end
     RuneReaderVoice:Dbg("QUEST_GREETING: " .. #text .. " chars")
     DispatchDialog(text)
@@ -534,15 +516,16 @@ handlers.QUEST_DETAIL = function()
     local segments = {}
 
     local title = ""
-    if GetTitleText() then
-      title = "Quest: " .. GetTitleText()
+    local questTitle = RuneReaderVoice.Compat:GetQuestTitle() or ""
+    if questTitle ~= "" then
+      title = "Quest: " .. questTitle
     end
     
     if title ~= "" then
         table.insert(segments, { text = title .. ". \n", isNarrator = true })
     end
 
-    local questText = GetQuestText() or ""
+    local questText = RuneReaderVoice.Compat:GetQuestText() or ""
     if questText ~= "" then
         local bodySegments = SplitQuestDetailBodySegments(questText .. "\n")
         for _, seg in ipairs(bodySegments) do
@@ -552,7 +535,7 @@ handlers.QUEST_DETAIL = function()
         end
     end
 
-    local objective = GetObjectiveText() or ""
+    local objective = RuneReaderVoice.Compat:GetObjectiveText() or ""
     if objective ~= "" then
         table.insert(segments, { text = objective .. "\n", isNarrator = true })
     end
@@ -588,7 +571,7 @@ end
 handlers.QUEST_PROGRESS = function()
     local db = RuneReaderVoiceDB
     if not db or not db.EnableQuestProgress then return end
-    local text = CleanText(GetProgressText() .. "\n")
+    local text = CleanText((RuneReaderVoice.Compat:GetProgressText() or "") .. "\n")
     if not text or #text == 0 then return end
     RuneReaderVoice:Dbg("QUEST_PROGRESS: " .. #text .. " chars")
     DispatchDialog(text)
@@ -598,7 +581,7 @@ end
 handlers.QUEST_COMPLETE = function()
     local db = RuneReaderVoiceDB
     if not db or not db.EnableQuestReward then return end
-    local text = CleanText(GetRewardText() .. "\n")
+    local text = CleanText((RuneReaderVoice.Compat:GetRewardText() or "") .. "\n")
     if not text or #text == 0 then return end
     RuneReaderVoice:Dbg("QUEST_COMPLETE: " .. #text .. " chars")
     DispatchDialog(text)
@@ -632,7 +615,7 @@ end
 
 -- ── Books ─────────────────────────────────────────────────────────────────────
 -- Full-scan strategy: on ITEM_TEXT_BEGIN, scan all pages by calling
--- ItemTextNextPage() to collect every page's text, then navigate back to
+-- RuneReaderVoice.Compat:NextItemPage() to collect every page's text, then navigate back to
 -- page 1 and dispatch the full book as a single dialog.
 -- The player sees the QR appear on page 1 with the complete text already
 -- encoded — no need to click through pages to hear the whole book.
@@ -642,7 +625,7 @@ end
 --   _bookScanning = false → ITEM_TEXT_READY in normal display mode (ignored, text
 --                           already dispatched from scan)
 --
--- IMPORTANT: Do not call ItemTextNextPage() / ItemTextPrevPage() repeatedly inside
+-- IMPORTANT: Do not call RuneReaderVoice.Compat:NextItemPage() / ItemTextPrevPage() repeatedly inside
 -- ITEM_TEXT_READY. WoW may fire ITEM_TEXT_READY synchronously from those calls. Large
 -- books can then recurse page-after-page inside the same Lua stack and hard-crash the
 -- client with STACK_OVERFLOW. Always schedule one page movement per timer tick.
@@ -653,15 +636,10 @@ local function ReadCurrentBookPageText()
     -- times. Reading on a timer tick plus this fallback avoids walking pages
     -- before the page body is actually available to the addon.
     local rawText = nil
-    if ItemTextGetText then
-        rawText = ItemTextGetText()
-    end
+    rawText = RuneReaderVoice.Compat:GetItemText()
 
     local frameText = nil
-    if ItemTextPageText and ItemTextPageText.GetText then
-        local ok, value = pcall(function() return ItemTextPageText:GetText() end)
-        if ok then frameText = value end
-    end
+    frameText = RuneReaderVoice.Compat:GetDisplayedItemText()
 
     local rawClean   = CleanText(rawText)
     local frameClean = CleanText(frameText)
@@ -707,7 +685,7 @@ local function ContinueBookReturnToFirstPage()
         return
     end
 
-    if _bookReturnRemaining <= 0 or not ItemTextPrevPage then
+    if _bookReturnRemaining <= 0 then
         _bookReturning = false
         _bookReturnRemaining = 0
         DispatchScannedBook()
@@ -717,7 +695,7 @@ local function ContinueBookReturnToFirstPage()
     _bookReturning = true
     RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): async back-nav step, remaining=" .. _bookReturnRemaining)
     _bookReturnRemaining = _bookReturnRemaining - 1
-    ItemTextPrevPage()
+    RuneReaderVoice.Compat:PrevItemPage()
     C_Timer.After(0, ContinueBookReturnToFirstPage)
 end
 
@@ -728,7 +706,7 @@ local function FinishBookScan(finalPageNum)
     _bookReadPending = false
     _bookReadToken = _bookReadToken + 1
 
-    if finalPageNum and finalPageNum > 1 and ItemTextPrevPage then
+    if finalPageNum and finalPageNum > 1 then
         _bookReturnRemaining = finalPageNum - 1
         C_Timer.After(0, ContinueBookReturnToFirstPage)
     else
@@ -746,19 +724,14 @@ local function ScheduleBookScanAdvance(pageNum)
             return
         end
 
-        local currentPage = (ItemTextGetPage and ItemTextGetPage()) or pageNum or 1
+        local currentPage = RuneReaderVoice.Compat:GetItemPage() or pageNum or 1
 
-        -- Use the explicit WoW predicate when available. ItemTextNextPage() is a
+        -- Use the explicit WoW predicate when available. RuneReaderVoice.Compat:NextItemPage() is a
         -- navigation command; its return value is not reliable enough to decide
         -- whether scan is complete. The previous async patch used that return value
         -- and could finish after page 1 even though the next page was loading.
-        if ItemTextHasNextPage and not ItemTextHasNextPage() then
-            _bookAdvancePending = false
-            FinishBookScan(currentPage)
-            return
-        end
-
-        if not ItemTextNextPage then
+        local hasNext, hasPredicate = RuneReaderVoice.Compat:HasNextItemPage()
+        if hasPredicate and not hasNext then
             _bookAdvancePending = false
             FinishBookScan(currentPage)
             return
@@ -769,11 +742,11 @@ local function ScheduleBookScanAdvance(pageNum)
         _bookAdvancePending = false
         local beforePage = currentPage
         RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): advancing to next page from " .. beforePage)
-        ItemTextNextPage()
+        RuneReaderVoice.Compat:NextItemPage()
 
         -- Fallback for clients without ItemTextHasNextPage(): if no READY arrives and
         -- the collected page number did not change, treat current page as last.
-        if not ItemTextHasNextPage then
+        if not hasPredicate then
             C_Timer.After(0.10, function()
                 if _bookActive and _bookScanning and not _bookAdvancePending and not _bookReadPending and _bookLastPageNum == beforePage then
                     RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): no next READY after page " .. beforePage .. ", finishing")
@@ -815,7 +788,7 @@ local function StoreScannedBookPage(pageNum, text, sourceKind, note)
     text = text or ""
 
     if pageNum == 1 then
-        _bookSource = CleanText(ItemTextGetItem())
+        _bookSource = CleanText(RuneReaderVoice.Compat:GetItemName())
     end
 
     if pageNum == _bookLastPageNum and text == _bookLastPageText then
@@ -851,7 +824,7 @@ local function ScheduleBookPageCapture(eventPageNum)
 
         attempts = attempts + 1
 
-        local pageNum = (ItemTextGetPage and ItemTextGetPage()) or eventPageNum or 1
+        local pageNum = RuneReaderVoice.Compat:GetItemPage() or eventPageNum or 1
         local text, sourceKind = ReadCurrentBookPageText()
 
         if text and #text > 0 then
@@ -896,7 +869,7 @@ handlers.ITEM_TEXT_READY = function()
     if not db or not db.EnableBooks then return end
     if not _bookActive then return end
 
-    local pageNum = (ItemTextGetPage and ItemTextGetPage()) or 1
+    local pageNum = RuneReaderVoice.Compat:GetItemPage() or 1
 
     if _bookScanning then
         -- Defer read until after Blizzard's ITEM_TEXT_READY handler has populated the
@@ -930,7 +903,7 @@ handlers.ITEM_TEXT_READY = function()
 
     -- Per-page mode (BookScanMode disabled): dispatch each page as shown.
     if not text or #text == 0 then return end
-    local source = CleanText(ItemTextGetItem())
+    local source = CleanText(RuneReaderVoice.Compat:GetItemName())
     local full = (pageNum == 1 and source and #source > 0)
         and (source .. "\n" .. text)
         or  text
@@ -965,7 +938,7 @@ end
 -- on every close path: Escape key, clicking away, Accept, Decline, clicking X.
 function RuneReaderVoice:HookWindowClose()
     if GossipFrame then
-        GossipFrame:HookScript("OnHide", function()
+        RuneReaderVoice.Compat:HookOnHide(GossipFrame, function()
             if RuneReaderVoice:IsPreviewActive() then return end
             -- Use delayed stop — gossip frame hides briefly during option navigation
             -- before reshowing with the same or a new NPC dialog. The 0.5s delay
@@ -976,7 +949,7 @@ function RuneReaderVoice:HookWindowClose()
     end
 
     if QuestFrame then
-        QuestFrame:HookScript("OnHide", function()
+        RuneReaderVoice.Compat:HookOnHide(QuestFrame, function()
             if RuneReaderVoice:IsPreviewActive() then return end
             RuneReaderVoice:Dbg("QuestFrame:OnHide -> StopDisplay")
             -- If QUEST_FINISHED timer is already scheduled for this dialog, let it run.
@@ -992,7 +965,7 @@ function RuneReaderVoice:HookWindowClose()
     end
 
     if ItemTextFrame then
-        ItemTextFrame:HookScript("OnHide", function()
+        RuneReaderVoice.Compat:HookOnHide(ItemTextFrame, function()
             if RuneReaderVoice:IsPreviewActive() then return end
             RuneReaderVoice:Dbg("ItemTextFrame:OnHide -> StopDisplay")
             _bookActive          = false
@@ -1102,39 +1075,24 @@ SlashCmdList["RUNEREADERVOICE"] = function(msg)
         end
 
     elseif msg == "race" then
-        local _, _, raceID_t  = UnitRace("target")
-        local _, _, raceID_qn = UnitRace("questnpc")
-        local _, _, raceID_n  = UnitRace("npc")
-        local ct_t  = UnitCreatureType("target")
-        local ct_qn = UnitCreatureType("questnpc")
-        local ct_n  = UnitCreatureType("npc")
+        local raceID, raceToken = RuneReaderVoice.Compat:GetRaceID()
+        local creatureType, creatureToken = RuneReaderVoice.Compat:GetCreatureType()
         local raceByte = RuneReaderVoice:GetNPCRaceByte()
         local npcID    = RuneReaderVoice:GetNPCID()
-        local guid     = UnitGUID("target") or UnitGUID("questnpc") or "nil"
+        local guid     = RuneReaderVoice.Compat:GetUnitGUID() or "nil"
         print("|cff00ccff[RuneReaderVoice]|r === NPC Race Info ===")
         print("  GUID: " .. guid)
-        print("  UnitRace: target=" .. tostring(raceID_t) .. "  questnpc=" .. tostring(raceID_qn) .. "  npc=" .. tostring(raceID_n))
-        print("  UnitCreatureType: target=" .. tostring(ct_t) .. "  questnpc=" .. tostring(ct_qn) .. "  npc=" .. tostring(ct_n))
+        print("  UnitRace: " .. tostring(raceID) .. " from " .. tostring(raceToken))
+        print("  UnitCreatureType: " .. tostring(creatureType) .. " from " .. tostring(creatureToken))
         print("  RACE byte: " .. string.format("0x%02X", raceByte))
         print("  NPC ID: " .. npcID)
         print("  Gender: " .. GetNPCGender())
 
     elseif msg == "gossip" then
         print("|cff00ccff[RuneReaderVoice]|r === Gossip Text Sources ===")
-        if C_GossipInfo and C_GossipInfo.GetText then
-            print("  C_GossipInfo.GetText: [" .. tostring(CleanText(C_GossipInfo.GetText())) .. "]")
-        else
-            print("  C_GossipInfo.GetText: (not available)")
-        end
-        if GetGossipText then
-            print("  GetGossipText: [" .. tostring(CleanText(GetGossipText())) .. "]")
-        end
-        if GossipGreetingText then
-            print("  GossipGreetingText FontString: [" .. tostring(CleanText(GossipGreetingText:GetText())) .. "]")
-        end
-        if GetGreetingText then
-            print("  GetGreetingText: [" .. tostring(CleanText(GetGreetingText())) .. "]")
-        end
+        local gossipText, gossipSource = RuneReaderVoice.Compat:GetGossipText()
+        print("  Gossip: [" .. tostring(CleanText(gossipText or "")) .. "] from " .. tostring(gossipSource))
+        print("  Greeting: [" .. tostring(CleanText(RuneReaderVoice.Compat:GetGreetingText() or "")) .. "]")
         print("  GossipFrame shown: " .. tostring(GossipFrame and GossipFrame:IsShown()))
         print("  NPC gender: " .. GetNPCGender())
         print("  Active dialog: " .. tostring(_activeDialogID))
