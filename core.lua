@@ -105,7 +105,14 @@ local _questDetailOpen      = false -- true only while a QUEST_DETAIL dialog is 
 local _bookActive           = false
 local _bookScanning         = false -- true while collecting all pages before dispatch
 local _bookNavigating       = 0     -- pages to skip during back-navigation after scan
+local _bookReturning        = false -- true while programmatically walking back to page 1
+local _bookReturnRemaining  = 0     -- async back-navigation pages remaining
+local _bookAdvancePending   = false -- true when next-page scan advance is scheduled/awaiting next READY
+local _bookReadPending      = false -- true while page body polling is active
+local _bookReadToken        = 0     -- increments to cancel stale page-body polling timers
 local _bookDispatched       = false -- true after scan-mode dispatch; suppresses duplicate ITEM_TEXT_READY
+local _bookLastPageNum      = nil   -- last collected page number during scan
+local _bookLastPageText     = nil   -- last collected page text during scan (duplicate READY guard)
 local _bookPages            = {}    -- collected page texts during scan
 local _bookSource           = nil   -- item name from first page
 
@@ -634,14 +641,165 @@ end
 --   _bookScanning = true  → ITEM_TEXT_READY collects text, advances to next page
 --   _bookScanning = false → ITEM_TEXT_READY in normal display mode (ignored, text
 --                           already dispatched from scan)
+--
+-- IMPORTANT: Do not call ItemTextNextPage() / ItemTextPrevPage() repeatedly inside
+-- ITEM_TEXT_READY. WoW may fire ITEM_TEXT_READY synchronously from those calls. Large
+-- books can then recurse page-after-page inside the same Lua stack and hard-crash the
+-- client with STACK_OVERFLOW. Always schedule one page movement per timer tick.
+
+local function ReadCurrentBookPageText()
+    -- Prefer the longest available source after WoW has populated the page UI.
+    -- Some books expose API text and displayed frame text at slightly different
+    -- times. Reading on a timer tick plus this fallback avoids walking pages
+    -- before the page body is actually available to the addon.
+    local rawText = nil
+    if ItemTextGetText then
+        rawText = ItemTextGetText()
+    end
+
+    local frameText = nil
+    if ItemTextPageText and ItemTextPageText.GetText then
+        local ok, value = pcall(function() return ItemTextPageText:GetText() end)
+        if ok then frameText = value end
+    end
+
+    local rawClean   = CleanText(rawText)
+    local frameClean = CleanText(frameText)
+
+    if frameClean and #frameClean > 0 and (not rawClean or #frameClean > #rawClean) then
+        return frameClean, "frame"
+    end
+
+    return rawClean, "api"
+end
+
+local function DispatchScannedBook()
+    if #_bookPages == 0 then
+        RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): no pages collected, aborting")
+        return
+    end
+
+    local parts = {}
+    if _bookSource and #_bookSource > 0 then
+        table.insert(parts, _bookSource)
+    end
+    for _, pageText in ipairs(_bookPages) do
+        table.insert(parts, pageText)
+    end
+
+    local full = table.concat(parts, "\n\n")
+    local bookID = BuildBookIdentityHex(_bookSource or "", _bookPages[1] or full)
+    RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): dispatching " .. #full .. " chars (" .. #_bookPages .. " pages) bookID=" .. bookID)
+    DispatchStructuredDialog({ { text = full, isNarrator = true } }, bookID, 0x00)
+
+    -- Suppress any further ITEM_TEXT_READY until user manually turns page.
+    _bookDispatched = true
+
+    -- Clear scan state.
+    _bookPages  = {}
+    _bookSource = nil
+end
+
+local function ContinueBookReturnToFirstPage()
+    if not _bookActive then
+        _bookReturning = false
+        _bookReturnRemaining = 0
+        return
+    end
+
+    if _bookReturnRemaining <= 0 or not ItemTextPrevPage then
+        _bookReturning = false
+        _bookReturnRemaining = 0
+        DispatchScannedBook()
+        return
+    end
+
+    _bookReturning = true
+    RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): async back-nav step, remaining=" .. _bookReturnRemaining)
+    _bookReturnRemaining = _bookReturnRemaining - 1
+    ItemTextPrevPage()
+    C_Timer.After(0, ContinueBookReturnToFirstPage)
+end
+
+local function FinishBookScan(finalPageNum)
+    RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): scan complete, " .. #_bookPages .. " pages collected")
+    _bookScanning = false
+    _bookAdvancePending = false
+    _bookReadPending = false
+    _bookReadToken = _bookReadToken + 1
+
+    if finalPageNum and finalPageNum > 1 and ItemTextPrevPage then
+        _bookReturnRemaining = finalPageNum - 1
+        C_Timer.After(0, ContinueBookReturnToFirstPage)
+    else
+        DispatchScannedBook()
+    end
+end
+
+local function ScheduleBookScanAdvance(pageNum)
+    if _bookAdvancePending then return end
+    _bookAdvancePending = true
+
+    C_Timer.After(0, function()
+        if not _bookActive or not _bookScanning then
+            _bookAdvancePending = false
+            return
+        end
+
+        local currentPage = (ItemTextGetPage and ItemTextGetPage()) or pageNum or 1
+
+        -- Use the explicit WoW predicate when available. ItemTextNextPage() is a
+        -- navigation command; its return value is not reliable enough to decide
+        -- whether scan is complete. The previous async patch used that return value
+        -- and could finish after page 1 even though the next page was loading.
+        if ItemTextHasNextPage and not ItemTextHasNextPage() then
+            _bookAdvancePending = false
+            FinishBookScan(currentPage)
+            return
+        end
+
+        if not ItemTextNextPage then
+            _bookAdvancePending = false
+            FinishBookScan(currentPage)
+            return
+        end
+
+        -- Clear before calling NextPage so a synchronous ITEM_TEXT_READY re-entry can
+        -- collect the next page and schedule exactly one future advance.
+        _bookAdvancePending = false
+        local beforePage = currentPage
+        RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): advancing to next page from " .. beforePage)
+        ItemTextNextPage()
+
+        -- Fallback for clients without ItemTextHasNextPage(): if no READY arrives and
+        -- the collected page number did not change, treat current page as last.
+        if not ItemTextHasNextPage then
+            C_Timer.After(0.10, function()
+                if _bookActive and _bookScanning and not _bookAdvancePending and not _bookReadPending and _bookLastPageNum == beforePage then
+                    RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): no next READY after page " .. beforePage .. ", finishing")
+                    FinishBookScan(beforePage)
+                end
+            end)
+        end
+    end)
+end
 
 handlers.ITEM_TEXT_BEGIN = function()
     local db = RuneReaderVoiceDB
     if not db or not db.EnableBooks then return end
 
-    _bookActive   = true
-    _bookPages    = {}
-    _bookSource   = nil
+    _bookActive          = true
+    _bookPages           = {}
+    _bookSource          = nil
+    _bookNavigating      = 0
+    _bookReturning       = false
+    _bookReturnRemaining = 0
+    _bookAdvancePending  = false
+    _bookReadPending     = false
+    _bookReadToken       = _bookReadToken + 1
+    _bookDispatched      = false
+    _bookLastPageNum     = nil
+    _bookLastPageText    = nil
 
     if db.BookScanMode then
         _bookScanning = true
@@ -653,85 +811,110 @@ handlers.ITEM_TEXT_BEGIN = function()
     -- ITEM_TEXT_READY fires immediately after for the first page.
 end
 
+local function StoreScannedBookPage(pageNum, text, sourceKind, note)
+    text = text or ""
+
+    if pageNum == 1 then
+        _bookSource = CleanText(ItemTextGetItem())
+    end
+
+    if pageNum == _bookLastPageNum and text == _bookLastPageText then
+        RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): duplicate page " .. pageNum .. " ignored" .. (note or ""))
+    else
+        RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): collected page " .. pageNum .. " (" .. #text .. " chars, " .. tostring(sourceKind) .. ")" .. (note or ""))
+        table.insert(_bookPages, text)
+        _bookLastPageNum  = pageNum
+        _bookLastPageText = text
+    end
+
+    ScheduleBookScanAdvance(pageNum)
+end
+
+local function ScheduleBookPageCapture(eventPageNum)
+    if _bookReadPending then return end
+    _bookReadPending = true
+    _bookReadToken = _bookReadToken + 1
+
+    local token = _bookReadToken
+    local attempts = 0
+    local lastText = nil
+    local stableReads = 0
+    local maxAttempts = 40       -- 40 * 0.05s = 2s worst-case page wait
+    local stableRequired = 2     -- require same non-empty text twice before storing
+
+    local function poll()
+        if token ~= _bookReadToken then return end
+        if not _bookActive or not _bookScanning then
+            _bookReadPending = false
+            return
+        end
+
+        attempts = attempts + 1
+
+        local pageNum = (ItemTextGetPage and ItemTextGetPage()) or eventPageNum or 1
+        local text, sourceKind = ReadCurrentBookPageText()
+
+        if text and #text > 0 then
+            if text == lastText then
+                stableReads = stableReads + 1
+            else
+                lastText = text
+                stableReads = 1
+            end
+
+            if stableReads >= stableRequired or attempts >= maxAttempts then
+                _bookReadPending = false
+                StoreScannedBookPage(pageNum, text, sourceKind, attempts >= maxAttempts and " after timeout" or "")
+                return
+            end
+
+            C_Timer.After(0.05, poll)
+            return
+        end
+
+        if attempts < maxAttempts then
+            if attempts == 1 or attempts == 10 or attempts == 20 then
+                RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): page " .. pageNum .. " still empty, waiting (attempt " .. attempts .. ")")
+            end
+            C_Timer.After(0.05, poll)
+            return
+        end
+
+        -- Do not end the whole book scan solely because one page body stayed empty.
+        -- Slow clients, protected/rendered text, or genuinely blank pages should not
+        -- prevent later pages from being collected. Page advancement decides completion.
+        _bookReadPending = false
+        RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): page " .. pageNum .. " stayed empty after wait; storing blank and continuing")
+        StoreScannedBookPage(pageNum, "", "empty-timeout", "")
+    end
+
+    C_Timer.After(0, poll)
+end
+
 handlers.ITEM_TEXT_READY = function()
     local db = RuneReaderVoiceDB
     if not db or not db.EnableBooks then return end
     if not _bookActive then return end
 
-    local text   = CleanText(ItemTextGetText())
     local pageNum = (ItemTextGetPage and ItemTextGetPage()) or 1
 
     if _bookScanning then
-        -- Scan mode: collect this page and advance
-        if not text or #text == 0 then
-            RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): empty page " .. pageNum .. ", ending scan")
-            -- treat as last page
-        else
-            if pageNum == 1 then
-                _bookSource = CleanText(ItemTextGetItem())
-            end
-            RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): collected page " .. pageNum .. " (" .. #text .. " chars)")
-            table.insert(_bookPages, text)
-        end
-
-        -- Try to advance to next page
-        local hasNext = ItemTextNextPage and ItemTextNextPage()
-        if hasNext then
-            -- ITEM_TEXT_READY will fire again for the next page
-            RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): advancing to next page")
-            return
-        end
-
-        -- No more pages — scan complete. Now navigate back to page 1.
-        RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): scan complete, " .. #_bookPages .. " pages collected")
-        _bookScanning = false
-
-        -- Navigate back to page 1 if we advanced past it.
-        -- ItemTextPrevPage() is available in modern WoW clients.
-        -- _bookNavigating suppresses the ITEM_TEXT_READY that fires on the next
-        -- frame as a result of the programmatic navigation.
-        if pageNum > 1 then
-            if ItemTextPrevPage then
-                -- Each PrevPage call may fire ITEM_TEXT_READY; suppress them all.
-                _bookNavigating = pageNum - 1
-                for _ = 1, pageNum - 1 do
-                    ItemTextPrevPage()
-                end
-                RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): navigating back " .. (pageNum-1) .. " page(s)")
-            else
-                RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): ItemTextPrevPage unavailable, staying on last page")
-            end
-        end
-
-        -- Assemble full book text and dispatch
-        if #_bookPages == 0 then
-            RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): no pages collected, aborting")
-            return
-        end
-
-        local parts = {}
-        if _bookSource and #_bookSource > 0 then
-            table.insert(parts, _bookSource)
-        end
-        for _, pageText in ipairs(_bookPages) do
-            table.insert(parts, pageText)
-        end
-
-        local full = table.concat(parts, "\n\n")
-        local bookID = BuildBookIdentityHex(_bookSource or "", _bookPages[1] or full)
-        RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): dispatching " .. #full .. " chars (" .. #_bookPages .. " pages) bookID=" .. bookID)
-        DispatchStructuredDialog({ { text = full, isNarrator = true } }, bookID, 0x00)
-
-        -- Suppress any further ITEM_TEXT_READY until user manually turns page
-        _bookDispatched = true
-
-        -- Clear scan state
-        _bookPages  = {}
-        _bookSource = nil
+        -- Defer read until after Blizzard's ITEM_TEXT_READY handler has populated the
+        -- page text. This keeps full-book scan async and prevents walking pages while
+        -- capturing empty/partial page data.
+        ScheduleBookPageCapture(pageNum)
         return
     end
 
-    -- Suppress ITEM_TEXT_READY events that fire during programmatic back-navigation.
+    local text = ReadCurrentBookPageText()
+
+    -- Suppress ITEM_TEXT_READY events that fire during async programmatic back-navigation.
+    if _bookReturning then
+        RuneReaderVoice:Dbg("ITEM_TEXT_READY: suppressed (async back-nav)")
+        return
+    end
+
+    -- Legacy guard for any old-style navigation state left behind.
     if _bookNavigating > 0 then
         _bookNavigating = _bookNavigating - 1
         RuneReaderVoice:Dbg("ITEM_TEXT_READY: suppressed (back-nav, remaining=" .. _bookNavigating .. ")")
@@ -759,12 +942,19 @@ handlers.ITEM_TEXT_READY = function()
 end
 
 handlers.ITEM_TEXT_CLOSED = function()
-    _bookActive      = false
-    _bookScanning    = false
-    _bookNavigating  = 0
-    _bookDispatched  = false
-    _bookPages       = {}
-    _bookSource      = nil
+    _bookActive          = false
+    _bookScanning        = false
+    _bookNavigating      = 0
+    _bookReturning       = false
+    _bookReturnRemaining = 0
+    _bookAdvancePending  = false
+    _bookReadPending     = false
+    _bookReadToken       = _bookReadToken + 1
+    _bookDispatched      = false
+    _bookLastPageNum     = nil
+    _bookLastPageText    = nil
+    _bookPages           = {}
+    _bookSource          = nil
     RuneReaderVoice:StopDisplay()
     _activeDialogID = nil
     RuneReaderVoice:Dbg("ITEM_TEXT_CLOSED")
@@ -805,7 +995,16 @@ function RuneReaderVoice:HookWindowClose()
         ItemTextFrame:HookScript("OnHide", function()
             if RuneReaderVoice:IsPreviewActive() then return end
             RuneReaderVoice:Dbg("ItemTextFrame:OnHide -> StopDisplay")
-            _bookActive     = false
+            _bookActive          = false
+            _bookScanning        = false
+            _bookNavigating      = 0
+            _bookReturning       = false
+            _bookReturnRemaining = 0
+            _bookAdvancePending  = false
+            _bookReadPending     = false
+            _bookReadToken       = _bookReadToken + 1
+            _bookLastPageNum     = nil
+            _bookLastPageText    = nil
             RuneReaderVoice:StopDisplay()
             _activeDialogID = nil
         end)
