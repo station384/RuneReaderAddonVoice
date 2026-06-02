@@ -31,11 +31,11 @@ local RRVB_START_STOP   = "\194\167"   -- § U+00A7, byte 0xA7 — start/stop ma
 -- strings so Lua never calls GetStringWidth on a secret value.
 local RRVB_COMBINED_WIDTH_DUMMY = "\194\167RRVX-G=Creature-0-00002-0-00-0000002-0000000000343246545;N=HIGH ABCDEFGHIJKLMNOPQRSTUVWXYZ\194\167"
 
-local RRVB_FONT_SIZE   = 12     -- barcode font size
+local RRVB_FONT_SIZE   = 13     -- barcode font size
 local RRVB_WRAP_WIDTH  = 100   -- GUID frame wrap width in pixels (0 = no wrap)
 local RRVB_WRAP_ROWS = 4
 local RRVB_HORIZONTAL_PADDING = 2
-local RRVB_INSET = 5            -- quiet zone padding around barcode content
+local RRVB_INSET = 6           -- quiet zone padding around barcode content
 local RRVB_LINE_SPACING = 2     -- line spacing adjustment when wrapped (pixels between lines)
 
 local _combinedPayload = nil
@@ -51,7 +51,12 @@ local function GetFontSize()
 end
 
 local function SetRrvbFont(fontString, fontSize)
-    fontString:SetFont(RRVB_FONT, fontSize, "")
+    fontString:SetFont(RRVB_FONT, fontSize, "MONOCHROME, SLUG")
+    fontString:SetSmoothScaling(false)
+    fontString:SetTextScale(1)
+    fontString:SetNonSpaceWrap(true)
+    fontString:SetWordWrap(true)
+    fontString:SetFixedColor(true)
     fontString:SetShadowOffset(0, 0)
     fontString:SetShadowColor(0, 0, 0, 0)
 end
@@ -88,10 +93,12 @@ local function CreateOneRrvbFrame(frameName, positionKey, defaultX, defaultY, du
     f:SetScale(1)
     f:SetBackdrop({
         bgFile = "Interface/Buttons/WHITE8X8",
+         edgeFile = "Interface/Buttons/WHITE8X8",
         tile   = true,
-        edgeSize = 0,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 }
+        edgeSize = 2,
+         insets   = { left = 1, right = 1, top = 1, bottom = 1 }
     })
+    f:SetBackdropBorderColor(0, 0, 0, 1)
     f:SetBackdropColor(0.3, 0.2, 0, 1)   -- same gray/brown background as Code39 frames
 
     f:SetMovable(true)
@@ -111,6 +118,8 @@ local function CreateOneRrvbFrame(frameName, positionKey, defaultX, defaultY, du
     bar:SetTextColor(0, 0, 0, 1)
     bar:SetShadowOffset(0, 0)
     bar:SetShadowColor(0, 0, 0, 0)
+    bar:SetTextScale(1)
+    bar:SetFixedColor(true)
     if bar.SetWordWrap    then bar:SetWordWrap(false)    end
     if bar.SetNonSpaceWrap then bar:SetNonSpaceWrap(false) end
     if bar.SetSpacing     then bar:SetSpacing(0)         end
