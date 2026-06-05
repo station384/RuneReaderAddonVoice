@@ -31,7 +31,7 @@ local RRVB_START_STOP   = "\194\167"   -- § U+00A7, byte 0xA7 — start/stop ma
 -- strings so Lua never calls GetStringWidth on a secret value.
 local RRVB_COMBINED_WIDTH_DUMMY = "\194\167RRVX-G=Creature-0-00002-0-00-0000002-0000000000343246545;N=HIGH ABCDEFGHIJKLMNOPQRSTUVWXYZ\194\167"
 
-local RRVB_FONT_SIZE   = 13     -- barcode font size
+local RRVB_FONT_SIZE   = 12    -- barcode font size
 local RRVB_WRAP_WIDTH  = 100   -- GUID frame wrap width in pixels (0 = no wrap)
 local RRVB_WRAP_ROWS = 4
 local RRVB_HORIZONTAL_PADDING = 2
