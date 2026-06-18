@@ -518,7 +518,7 @@ handlers.QUEST_DETAIL = function()
     local title = ""
     local questTitle = RuneReaderVoice.Compat:GetQuestTitle() or ""
     if questTitle ~= "" then
-      title = "Quest: " .. questTitle
+      title = "\"quest, " .. questTitle .. "\""
     end
     
     if title ~= "" then
@@ -537,7 +537,7 @@ handlers.QUEST_DETAIL = function()
 
     local objective = RuneReaderVoice.Compat:GetObjectiveText() or ""
     if objective ~= "" then
-        table.insert(segments, { text = objective .. "\n", isNarrator = true })
+        table.insert(segments, { text = "\"" .. objective .. "\n\"", isNarrator = true })
     end
 
     if #segments == 0 then
