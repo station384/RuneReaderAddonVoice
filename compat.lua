@@ -113,6 +113,7 @@ local UnitTokens = { "target", "questnpc", "npc" }
 function Compat:GetUnitSex()
     for _, token in ipairs(UnitTokens) do
         local sex = SafeCall(UnitSex, token)
+        if (issecretvalue(sex)) then return 0 end
         if sex then return sex end
     end
     return 1
@@ -120,6 +121,7 @@ end
 
 function Compat:GetNPCGender()
     local sex = self:GetUnitSex()
+
     if sex == 2 then return "male" end
     if sex == 3 then return "female" end
     return "unknown"
