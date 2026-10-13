@@ -19,18 +19,59 @@ local function ProjectEquals(name)
     return _G[name] ~= nil and WOW_PROJECT_ID == _G[name]
 end
 
+-- Interface (.toc) version of the running client, e.g. 120100, 16001, 11509.
+local function ReadInterfaceVersion()
+    if type(GetBuildInfo) ~= "function" then return 0 end
+    local ok, v = pcall(function() return select(4, GetBuildInfo()) end)
+    if ok and type(v) == "number" and v > 0 then
+        return v
+    end
+    return 0
+end
+
+-- Map an interface (.toc) version to a client flavor.
+-- The interface number is the reliable signal: game types derived from the
+-- Mainline client can report the same WOW_PROJECT_ID as Mainline (e.g. WoW
+-- Forever reports 1, identical to Midnight) yet always carry a distinct
+-- interface number.
+--
+--   >= 100000       retail / mainline (10.x, 11.x, 12.x Midnight, ...)
+--   50000 - 59999   classic mists
+--   40000 - 49999   classic cataclysm
+--   30000 - 39999   classic wrath (incl. Titan Reforged 38xxx)
+--   20000 - 29999   classic tbc
+--   16000 - 19999   forever (1.60.x)
+--   10000 - 15999   classic era (vanilla)
+local function FlavorFromInterface(iface)
+    if not iface or iface <= 0 then return nil end
+    if iface >= 100000 then return "retail"        end
+    if iface >= 50000  then return "classic_mists" end
+    if iface >= 40000  then return "classic_cata"  end
+    if iface >= 30000  then return "classic_wrath" end
+    if iface >= 20000  then return "classic_bcc"   end
+    if iface >= 16000  then return "forever"       end
+    if iface >= 10000  then return "classic_era"   end
+    return nil
+end
+
 local function DetectFlavor()
-    if ProjectEquals("WOW_PROJECT_MAINLINE") then return "retail" end
-    if ProjectEquals("WOW_PROJECT_CLASSIC") then return "classic_era" end
+    -- Interface number first - see FlavorFromInterface for why.
+    local flavor = FlavorFromInterface(ReadInterfaceVersion())
+    if flavor then return flavor end
+
+    -- Fallback when the interface number is unavailable.
+    if ProjectEquals("WOW_PROJECT_MAINLINE")                then return "retail" end
+    if ProjectEquals("WOW_PROJECT_CLASSIC")                 then return "classic_era" end
     if ProjectEquals("WOW_PROJECT_BURNING_CRUSADE_CLASSIC") then return "classic_bcc" end
-    if ProjectEquals("WOW_PROJECT_WRATH_CLASSIC") then return "classic_wrath" end
-    if ProjectEquals("WOW_PROJECT_CATACLYSM_CLASSIC") then return "classic_cata" end
-    if ProjectEquals("WOW_PROJECT_MISTS_CLASSIC") then return "classic_mists" end
+    if ProjectEquals("WOW_PROJECT_WRATH_CLASSIC")           then return "classic_wrath" end
+    if ProjectEquals("WOW_PROJECT_CATACLYSM_CLASSIC")       then return "classic_cata" end
+    if ProjectEquals("WOW_PROJECT_MISTS_CLASSIC")           then return "classic_mists" end
     return "unknown"
 end
 
 Compat.Flavor = DetectFlavor()
-Compat.IsRetail = Compat.Flavor == "retail"
+-- Forever runs the Mainline UI/API, so treat it as mainline for API branching.
+Compat.IsRetail  = (Compat.Flavor == "retail" or Compat.Flavor == "forever")
 Compat.IsClassic = not Compat.IsRetail
 
 function Compat:SafeCall(fn, ...)
@@ -68,6 +109,43 @@ function Compat:GetQuestText()     return SafeCall(GetQuestText) or "" end
 function Compat:GetObjectiveText() return SafeCall(GetObjectiveText) or "" end
 function Compat:GetProgressText()  return SafeCall(GetProgressText) or "" end
 function Compat:GetRewardText()    return SafeCall(GetRewardText) or "" end
+
+-- ── Client / quest identity ───────────────────────────────────────────────────
+
+-- Interface (TOC) version of the running client, e.g. 120007, 11507, 50500.
+-- Cached after the first read. Returns 0 when unavailable.
+local _cachedBuildVersion = nil
+
+function Compat:GetBuildVersion()
+    if _cachedBuildVersion ~= nil then return _cachedBuildVersion end
+    _cachedBuildVersion = ReadInterfaceVersion()
+    return _cachedBuildVersion
+end
+
+-- Quest ID for the quest currently shown in the quest frame.
+-- Tries the modern API first, then the classic global. Returns a positive
+-- integer, or nil when no quest is active or the value is unavailable/secret.
+function Compat:GetQuestID()
+    local ok, result = pcall(function()
+        local id
+        if C_QuestLog and C_QuestLog.GetQuestIDForQuestFrame then
+            id = C_QuestLog.GetQuestIDForQuestFrame()
+        end
+        if (not id or id == 0) and type(GetQuestID) == "function" then
+            id = GetQuestID()
+        end
+
+        if id == nil then return nil end
+        if issecretvalue and issecretvalue(id) then return nil end
+
+        id = tonumber(id)
+        if id and id > 0 then return id end
+        return nil
+    end)
+
+    if ok then return result end
+    return nil
+end
 
 function Compat:GetItemText()
     return SafeCall(ItemTextGetText) or ""

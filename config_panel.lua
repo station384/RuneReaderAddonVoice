@@ -58,30 +58,32 @@ function RuneReaderVoice:CreateConfigPanel()
 
     local category = Settings.RegisterVerticalLayoutCategory("RuneReaderVoice")
 
-    -- Single OnChanged handler for every setting.
-    -- Writes value to DB, then calls ApplyConfig with the changed key.
-    local function OnChanged(setting, value)
-        local key = setting:GetVariable()
-        RuneReaderVoiceDB[key] = value
-        -- print("|cff00ccff[RRV]|r setting changed: " .. tostring(key) .. " = " .. tostring(value))
-        -- Custom slider visibility driven by PadPreset
-        if key == "PadPreset" then
-            RuneReaderVoice:UpdateCustomSliderVisibility(value)
+    -- Each setting gets a handler that closes over its DB key, writes the value
+    -- to the DB, then calls ApplyConfig with the changed key.
+    -- (setting:GetVariable() returns the setting's 'variable' argument -- the
+    -- display label -- not its DB key, so it cannot be used here.)
+    local function MakeOnChanged(key)
+        return function(_, value)
+            RuneReaderVoiceDB[key] = value
+            -- Custom slider visibility driven by PadPreset
+            if key == "PadPreset" then
+                RuneReaderVoice:UpdateCustomSliderVisibility(value)
+            end
+            RuneReaderVoice:ApplyConfig(key)
         end
-        RuneReaderVoice:ApplyConfig(key)
     end
 
     local function AddCheckbox(key, label, tooltip, default)
         local s = Settings.RegisterAddOnSetting(
             category, label, key, RuneReaderVoiceDB, type(default), label, default)
-        s:SetValueChangedCallback(OnChanged)
+        s:SetValueChangedCallback(MakeOnChanged(key))
         Settings.CreateCheckbox(category, s, tooltip)
     end
 
     local function AddSlider(key, label, tooltip, default, min, max, step, fmt)
         local s = Settings.RegisterAddOnSetting(
             category, label, key, RuneReaderVoiceDB, type(default), label, default)
-        s:SetValueChangedCallback(OnChanged)
+        s:SetValueChangedCallback(MakeOnChanged(key))
         local opts = Settings.CreateSliderOptions(min, max, step)
         opts:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right,
             function(v) return string.format(fmt, v) end)
@@ -92,7 +94,7 @@ function RuneReaderVoice:CreateConfigPanel()
     local function AddDropdown(key, label, tooltip, default, options)
         local s = Settings.RegisterAddOnSetting(
             category, label, key, RuneReaderVoiceDB, type(default), label, default)
-        s:SetValueChangedCallback(OnChanged)
+        s:SetValueChangedCallback(MakeOnChanged(key))
         local init = Settings.CreateDropdown(category, s, function()
             local c = Settings.CreateControlTextContainer()
             for i, txt in ipairs(options) do c:Add(i - 1, txt) end

@@ -66,6 +66,14 @@
 -- Payload:
 --   Each chunk is space-padded to GetPadSize() raw bytes before Base64 encoding.
 --   All chunks in a segment pad to the same length → QR version never changes.
+--
+-- Metadata prefix (segment 1 only, prepended before speaker text):
+--   \x02RRV:KEY=value\x03 tokens. The reader strips them before speech and
+--   applies them to the whole dialog.
+--     RRV:BUILD   - client interface/TOC version (e.g. 120007). Always emitted.
+--     RRV:QUESTID - real quest ID for quest dialogs; a synthetic text identity
+--                   for books/gossip/greetings (F00000-FFFFFF reserved range).
+--     RRV:PLAYER / RRV:REALM / RRV:CLASS / RRV:TITLE / RRV:NPCNAME
 
 RuneReaderVoice = RuneReaderVoice or {}
 
@@ -182,7 +190,7 @@ local function GetCurrentNpcNameForMeta()
     return ""
 end
 
-local function BuildDialogMetaPrefix()
+local function BuildDialogMetaPrefix(questID)
     local fullName = UnitName("player") or ""
     local player = StripRealm(fullName)
     local realm = GetRealmName() or ""
@@ -191,6 +199,14 @@ local function BuildDialogMetaPrefix()
     local npcName = GetCurrentNpcNameForMeta()
 
     local parts = {}
+
+    -- Client interface version - lets the reader disambiguate NPC IDs that
+    -- collide across client lines (retail vs classic/era/etc).
+    local build = RuneReaderVoice.Compat:GetBuildVersion()
+    if build and build > 0 then
+        table.insert(parts, META_START .. "RRV:BUILD=" .. string.format("%d", build) .. META_END)
+    end
+
     if player ~= "" then
         table.insert(parts, META_START .. "RRV:PLAYER=" .. player .. META_END)
     end
@@ -207,13 +223,20 @@ local function BuildDialogMetaPrefix()
         table.insert(parts, META_START .. "RRV:NPCNAME=" .. npcName .. META_END)
     end
 
+    -- Real quest ID for quest dialogs, or a synthetic text identity for books,
+    -- gossip, and greetings (F00000-FFFFFF reserved range).
+    local qid = tonumber(questID)
+    if qid and qid > 0 then
+        table.insert(parts, META_START .. "RRV:QUESTID=" .. string.format("%d", qid) .. META_END)
+    end
+
     if #parts == 0 then return "" end
     return table.concat(parts, "")
 end
 
-local function PrependDialogMetaToSegments(segments, isPreview)
+local function PrependDialogMetaToSegments(segments, isPreview, questID)
     if isPreview or not segments or #segments == 0 then return end
-    local prefix = BuildDialogMetaPrefix()
+    local prefix = BuildDialogMetaPrefix(questID)
     if prefix == "" then return end
     segments[1].text = prefix .. (segments[1].text or "")
 end
@@ -662,7 +685,7 @@ end
 -- Returns: dialogID (number), array of sessions
 --   Each session: { sessionID=number, qrStrings=array, isNarrator=bool }
 -- isPreview: if true sets FLAG_PREVIEW so reader discards the packet.
-function RuneReaderVoice:BuildDialogSessions(text, isPreview, npcIDOverride, raceByteOverride)
+function RuneReaderVoice:BuildDialogSessions(text, isPreview, npcIDOverride, raceByteOverride, questIDOverride)
     if not text or #text == 0 then return nil, nil end
 
     local dialogID = NextDialogID()
@@ -673,7 +696,7 @@ function RuneReaderVoice:BuildDialogSessions(text, isPreview, npcIDOverride, rac
         code39GuidPayload, code39NamePayload = RuneReaderVoice:BuildRrvbSideChannel(isPreview)
     end
     local segments = RuneReaderVoice:SplitSegments(text)
-    PrependDialogMetaToSegments(segments, isPreview)
+    PrependDialogMetaToSegments(segments, isPreview, questIDOverride)
     local seqTotal = #segments      -- known upfront before any encoding begins
 
     RuneReaderVoice:QrDbg(string.format("BuildDialogSessions: dialog=%04X rawLen=%d segments=%d preview=%s", dialogID, #text, seqTotal, tostring(isPreview)))
@@ -709,7 +732,7 @@ end
 
 -- Build all segments for a dialog block from explicit structured segments.
 -- segments: array of { text=string, isNarrator=bool }
-function RuneReaderVoice:BuildDialogSessionsFromSegments(segments, isPreview, npcIDOverride, raceByteOverride)
+function RuneReaderVoice:BuildDialogSessionsFromSegments(segments, isPreview, npcIDOverride, raceByteOverride, questIDOverride)
     if not segments or #segments == 0 then return nil, nil end
 
     local filtered = {}
@@ -722,7 +745,7 @@ function RuneReaderVoice:BuildDialogSessionsFromSegments(segments, isPreview, np
 
     if #filtered == 0 then return nil, nil end
 
-    PrependDialogMetaToSegments(filtered, isPreview)
+    PrependDialogMetaToSegments(filtered, isPreview, questIDOverride)
 
     local dialogID = NextDialogID()
     local raceByte = raceByteOverride or (isPreview and 0x00 or RuneReaderVoice:GetNPCRaceByte())

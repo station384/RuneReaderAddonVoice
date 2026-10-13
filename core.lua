@@ -234,19 +234,26 @@ local function NormalizeBookKeyPart(s)
     return s
 end
 
-local function HashBookIdentity24(s)
+local function HashIdentity24(key)
     local h = 2166136261
-    for i = 1, #s do
-        h = (h * 16777619 + string.byte(s, i)) % 4294967296
+    for i = 1, #key do
+        h = (h * 16777619 + string.byte(key, i)) % 4294967296
     end
-    return h % 16777216
+    return 0xF00000 + (h % 0x100000)  -- reserve Fxxxxx range for synthetic identities
 end
 
 local function BuildBookIdentityHex(title, firstPageText)
     local key = "BOOK|" .. NormalizeBookKeyPart(title) .. "|" .. NormalizeBookKeyPart(firstPageText)
-    local value = HashBookIdentity24(key)
-    value = 0xF00000 + (value % 0x100000)  -- reserve Fxxxxx range for synthetic book identities
-    return string.format("%06X", value)
+    return string.format("%06X", HashIdentity24(key))
+end
+
+-- Deterministic synthetic identity for non-quest dialogs (gossip, greetings,
+-- and anything else without a real quest ID). Hashes the cleaned dialog text
+-- into the reserved Fxxxxx range so the reader can tell it apart from a real
+-- quest ID (real IDs are far below 0xF00000).
+function RuneReaderVoice:BuildSyntheticId(text)
+    if not text or #text == 0 then return nil end
+    return HashIdentity24("TEXT|" .. text)
 end
 
 local _pendingCloseTimer = nil
@@ -283,9 +290,13 @@ end
 -- DispatchDialog: split text into narrator/NPC segments, build QR sessions,
 -- hand all sessions to StartDisplaySessions for cycling.
 -- Returns: dialogID (for QUEST_FINISHED guard) or nil on empty text.
-local function DispatchDialog(text, npcIDOverride, raceByteOverride)
+local function DispatchDialog(text, npcIDOverride, raceByteOverride, questIDOverride, syntheticFromText)
     text = CleanText(text)
     if not text or #text == 0 then return nil end
+
+    if syntheticFromText and not questIDOverride then
+        questIDOverride = RuneReaderVoice:BuildSyntheticId(text)
+    end
 
     local db = RuneReaderVoiceDB
     if db and db.DEBUG then
@@ -296,7 +307,7 @@ local function DispatchDialog(text, npcIDOverride, raceByteOverride)
         ))
     end
 
-    local dialogID, sessions, code39GuidPayload, code39NamePayload = RuneReaderVoice:BuildDialogSessions(text, false, npcIDOverride, raceByteOverride)
+    local dialogID, sessions, code39GuidPayload, code39NamePayload = RuneReaderVoice:BuildDialogSessions(text, false, npcIDOverride, raceByteOverride, questIDOverride)
     if not sessions or #sessions == 0 then
         RuneReaderVoice:Dbg("BuildDialogSessions returned empty")
         return nil
@@ -316,7 +327,7 @@ end
 
 
 
-local function DispatchStructuredDialog(segments, npcIDOverride, raceByteOverride)
+local function DispatchStructuredDialog(segments, npcIDOverride, raceByteOverride, questIDOverride, syntheticFromText)
     if not segments or #segments == 0 then return nil end
 
     local cleaned = {}
@@ -334,6 +345,14 @@ local function DispatchStructuredDialog(segments, npcIDOverride, raceByteOverrid
 
     if #cleaned == 0 then return nil end
 
+    if syntheticFromText and not questIDOverride then
+        local combined = {}
+        for _, seg in ipairs(cleaned) do
+            combined[#combined + 1] = seg.text
+        end
+        questIDOverride = RuneReaderVoice:BuildSyntheticId(table.concat(combined, "\n"))
+    end
+
     local db = RuneReaderVoiceDB
     if db and db.DEBUG then
         RuneReaderVoice:Dbg(string.format(
@@ -342,7 +361,7 @@ local function DispatchStructuredDialog(segments, npcIDOverride, raceByteOverrid
         ))
     end
 
-    local dialogID, sessions, code39GuidPayload, code39NamePayload = RuneReaderVoice:BuildDialogSessionsFromSegments(cleaned, false, npcIDOverride, raceByteOverride)
+    local dialogID, sessions, code39GuidPayload, code39NamePayload = RuneReaderVoice:BuildDialogSessionsFromSegments(cleaned, false, npcIDOverride, raceByteOverride, questIDOverride)
     if not sessions or #sessions == 0 then
         RuneReaderVoice:Dbg("BuildDialogSessionsFromSegments returned empty")
         return nil
@@ -457,7 +476,7 @@ handlers.GOSSIP_SHOW = function(arg1)
         local text = GetGossipBodyText()
         if not text then return end
         RuneReaderVoice:Dbg("GOSSIP_SHOW: " .. #text .. " chars  gender=" .. GetNPCGender())
-        DispatchDialog(text)
+        DispatchDialog(text, nil, nil, nil, true)
     end)
 end
 
@@ -498,7 +517,7 @@ handlers.QUEST_GREETING = function()
     local text = CleanText((RuneReaderVoice.Compat:GetGreetingText() or "") .. "\n")
     if not text or #text == 0 then return end
     RuneReaderVoice:Dbg("QUEST_GREETING: " .. #text .. " chars")
-    DispatchDialog(text)
+    DispatchDialog(text, nil, nil, nil, true)
 end
 
 -- ── Quest detail ──────────────────────────────────────────────────────────────
@@ -552,7 +571,8 @@ handlers.QUEST_DETAIL = function()
 
     RuneReaderVoice:Dbg("QUEST_DETAIL: " .. totalChars .. " chars  structured segments=" .. #segments .. "  gender=" .. GetNPCGender())
 
-    local did = DispatchStructuredDialog(segments)
+    local questID = RuneReaderVoice.Compat:GetQuestID()
+    local did = DispatchStructuredDialog(segments, nil, nil, questID)
     if did then
         _questDetailDialogID = did
         _questDetailOpen = true
@@ -574,7 +594,7 @@ handlers.QUEST_PROGRESS = function()
     local text = CleanText((RuneReaderVoice.Compat:GetProgressText() or "") .. "\n")
     if not text or #text == 0 then return end
     RuneReaderVoice:Dbg("QUEST_PROGRESS: " .. #text .. " chars")
-    DispatchDialog(text)
+    DispatchDialog(text, nil, nil, RuneReaderVoice.Compat:GetQuestID())
 end
 
 -- ── Quest complete / reward ───────────────────────────────────────────────────
@@ -584,7 +604,7 @@ handlers.QUEST_COMPLETE = function()
     local text = CleanText((RuneReaderVoice.Compat:GetRewardText() or "") .. "\n")
     if not text or #text == 0 then return end
     RuneReaderVoice:Dbg("QUEST_COMPLETE: " .. #text .. " chars")
-    DispatchDialog(text)
+    DispatchDialog(text, nil, nil, RuneReaderVoice.Compat:GetQuestID())
 end
 
 -- ── Quest finished ────────────────────────────────────────────────────────────
@@ -668,7 +688,7 @@ local function DispatchScannedBook()
     local full = table.concat(parts, "\n\n")
     local bookID = BuildBookIdentityHex(_bookSource or "", _bookPages[1] or full)
     RuneReaderVoice:Dbg("ITEM_TEXT_READY (scan): dispatching " .. #full .. " chars (" .. #_bookPages .. " pages) bookID=" .. bookID)
-    DispatchStructuredDialog({ { text = full, isNarrator = true } }, bookID, 0x00)
+    DispatchStructuredDialog({ { text = full, isNarrator = true } }, bookID, 0x00, tonumber(bookID, 16))
 
     -- Suppress any further ITEM_TEXT_READY until user manually turns page.
     _bookDispatched = true
@@ -911,7 +931,7 @@ handlers.ITEM_TEXT_READY = function()
     -- User manually navigated — clear dispatched flag so future pages are processed
     _bookDispatched = false
     RuneReaderVoice:Dbg("ITEM_TEXT_READY (per-page): page " .. pageNum .. " (" .. #full .. " chars) bookID=" .. bookID)
-    DispatchStructuredDialog({ { text = full, isNarrator = true } }, bookID, 0x00)
+    DispatchStructuredDialog({ { text = full, isNarrator = true } }, bookID, 0x00, tonumber(bookID, 16))
 end
 
 handlers.ITEM_TEXT_CLOSED = function()
@@ -1088,6 +1108,14 @@ SlashCmdList["RUNEREADERVOICE"] = function(msg)
         print("  NPC ID: " .. npcID)
         print("  Gender: " .. GetNPCGender())
 
+    elseif msg == "ver" then
+        local flavor  = RuneReaderVoice.Compat.Flavor
+        local build   = RuneReaderVoice.Compat:GetBuildVersion()
+        local project = rawget(_G, "WOW_PROJECT_ID")
+        local questID = RuneReaderVoice.Compat:GetQuestID()
+        print(string.format("|cff00ccff[RuneReaderVoice]|r flavor=%s  build=%s  projectID=%s  questID=%s",
+            tostring(flavor), tostring(build), tostring(project), tostring(questID)))
+
     elseif msg == "gossip" then
         print("|cff00ccff[RuneReaderVoice]|r === Gossip Text Sources ===")
         local gossipText, gossipSource = RuneReaderVoice.Compat:GetGossipText()
@@ -1109,6 +1137,7 @@ SlashCmdList["RUNEREADERVOICE"] = function(msg)
         print("  /rrv rrvbsize   - cycle barcode font size")
         print("  /rrv rrvbreset  - reset barcode frame positions")
         print("  /rrv race    - show detected race/creature info (use while dialog open)")
+        print("  /rrv ver     - show client flavor/build and current quest ID")
         print("  /rrv gossip  - dump all NPC text sources (use while dialog open)")
     end
 end
